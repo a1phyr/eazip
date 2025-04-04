@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::fmt;
 
 pub unsafe trait Pod: Copy + 'static {

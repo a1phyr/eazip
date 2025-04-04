@@ -1,8 +1,10 @@
 //! Extra fields parsing
 //!
-//! Reference: https://libzip.org/specifications/extrafld.txt
+//! Reference: <https://libzip.org/specifications/extrafld.txt>
 
 use std::fmt;
+
+use crate::utils::Timestamp;
 
 struct DataParser<'a>(&'a [u8]);
 
@@ -171,9 +173,9 @@ impl Zip64ExtendedInformation {
 
 #[derive(Debug, Clone)]
 pub struct NtfsTimes {
-    pub mtime: u64,
-    pub atime: u64,
-    pub ctime: u64,
+    pub mtime: Timestamp,
+    pub atime: Timestamp,
+    pub ctime: Timestamp,
 }
 
 #[derive(Debug, Clone)]
@@ -195,9 +197,9 @@ impl Ntfs {
             match typ {
                 0x0001 => {
                     times = Some(NtfsTimes {
-                        mtime: data.read_u64()?,
-                        atime: data.read_u64()?,
-                        ctime: data.read_u64()?,
+                        mtime: Timestamp::from_ntfs(data.read_u64()?),
+                        atime: Timestamp::from_ntfs(data.read_u64()?),
+                        ctime: Timestamp::from_ntfs(data.read_u64()?),
                     });
                 }
                 _ => continue, // unsupported
@@ -210,10 +212,9 @@ impl Ntfs {
 
 #[derive(Debug, Clone)]
 pub struct ExtendedTimestamp {
-    pub flags: u8,
-    pub modification_time: Option<u32>,
-    pub access_time: Option<u32>,
-    pub creation_time: Option<u32>,
+    pub modification_time: Option<Timestamp>,
+    pub access_time: Option<Timestamp>,
+    pub creation_time: Option<Timestamp>,
 }
 
 impl ExtendedTimestamp {
@@ -225,27 +226,26 @@ impl ExtendedTimestamp {
         // assume that this is modification time
         if data.0.len() == 4 && flags.count_ones() != 1 {
             return Some(ExtendedTimestamp {
-                flags,
-                modification_time: data.read_u32(),
+                modification_time: Some(Timestamp::from_unix(data.read_u32()? as _)),
                 access_time: None,
                 creation_time: None,
             });
         }
 
         let modification_time = if flags & 1 != 0 {
-            Some(data.read_u32()?)
+            Some(Timestamp::from_unix(data.read_u32()? as _))
         } else {
             None
         };
 
         let access_time = if flags & 2 != 0 {
-            Some(data.read_u32()?)
+            Some(Timestamp::from_unix(data.read_u32()? as _))
         } else {
             None
         };
 
         let creation_time = if flags & 4 != 0 {
-            Some(data.read_u32()?)
+            Some(Timestamp::from_unix(data.read_u32()? as _))
         } else {
             None
         };
@@ -253,7 +253,6 @@ impl ExtendedTimestamp {
         data.end()?;
 
         Some(ExtendedTimestamp {
-            flags,
             modification_time,
             access_time,
             creation_time,

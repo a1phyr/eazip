@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     collections::HashMap,
     fmt,
     io::{self, BufRead, Read, Seek},
@@ -9,12 +8,13 @@ use crate::{
     CompressionMethod, Decompressor,
     crc32::Crc32Checker,
     types::{self, Pod},
+    utils::Timestamp,
 };
 
-mod extra_field;
+pub mod extra_field;
 pub mod stream;
 
-pub use extra_field::*;
+use extra_field::{ExtraField, ExtraFields};
 
 trait ReadExt: Read {
     fn read_variable(&mut self, size: usize) -> io::Result<Box<[u8]>> {
@@ -167,16 +167,24 @@ impl RawArchive {
 #[derive(Clone)]
 pub struct Metadata {
     pub crc32: u32,
-    pub flags: u16,
-    pub header_offset: Option<u64>,
+    flags: u16,
+    header_offset: Option<u64>,
     pub compressed_size: u64,
     pub uncompressed_size: u64,
     pub compression_method: CompressionMethod,
-    pub external_attributes: Option<u32>,
+    external_attributes: Option<u32>,
 
-    pub file_name: Box<[u8]>,
+    pub modification_time: Option<Timestamp>,
+    pub access_time: Option<Timestamp>,
+    pub creation_time: Option<Timestamp>,
+
+    raw_name: Box<[u8]>,
+    name: Box<str>,
+
+    raw_comment: Option<Box<[u8]>>,
+    comment: Option<Box<str>>,
+
     pub extra_fields: ExtraFields,
-    pub comment: Option<Box<[u8]>>,
 }
 
 impl Metadata {
@@ -185,39 +193,127 @@ impl Metadata {
         file_name: Box<[u8]>,
         extra_fields: Box<[u8]>,
     ) -> Self {
-        Self {
+        let flags = header.flags.get();
+        let is_unicode = flags & (1 << 11) != 0;
+
+        let name = if is_unicode {
+            String::from_utf8_lossy(&file_name)
+        } else {
+            crate::cp437::convert(&file_name)
+        };
+
+        let mut meta = Self {
             crc32: header.crc32.get(),
-            flags: header.flags.get(),
+            flags,
             header_offset: None,
             compressed_size: header.compressed_size.get() as u64,
             uncompressed_size: header.uncompressed_size.get() as u64,
             compression_method: CompressionMethod(header.compression_method.get()),
             external_attributes: None,
 
-            file_name,
-            extra_fields: ExtraFields(extra_fields),
+            modification_time: None,
+            access_time: None,
+            creation_time: None,
+
+            name: name.into(),
+            raw_name: file_name,
+
             comment: None,
-        }
+            raw_comment: None,
+
+            extra_fields: ExtraFields(extra_fields),
+        };
+
+        meta.parse_extra_fields();
+
+        meta
     }
 
     pub(crate) fn from_central_header(
         header: types::CentralFileHeader,
-        file_name: Box<[u8]>,
+        raw_name: Box<[u8]>,
         extra_fields: Box<[u8]>,
-        comment: Box<[u8]>,
+        raw_comment: Box<[u8]>,
     ) -> Self {
-        Self {
+        let flags = header.flags.get();
+        let is_unicode = flags & (1 << 11) != 0;
+
+        let (name, comment) = if is_unicode {
+            (
+                String::from_utf8_lossy(&raw_name),
+                String::from_utf8_lossy(&raw_comment),
+            )
+        } else {
+            (
+                crate::cp437::convert(&raw_name),
+                crate::cp437::convert(&raw_comment),
+            )
+        };
+
+        let mut meta = Self {
             crc32: header.crc32.get(),
-            flags: header.flags.get(),
+            flags,
             header_offset: Some(header.local_header_offset.get() as u64),
             compressed_size: header.compressed_size.get() as u64,
             uncompressed_size: header.uncompressed_size.get() as u64,
             compression_method: CompressionMethod(header.compression_method.get()),
             external_attributes: Some(header.external_attributes.get()),
 
-            file_name,
+            modification_time: None,
+            access_time: None,
+            creation_time: None,
+
+            name: name.into(),
+            raw_name,
+
+            comment: Some(comment.into()),
+            raw_comment: Some(raw_comment),
+
             extra_fields: ExtraFields(extra_fields),
-            comment: Some(comment),
+        };
+
+        meta.parse_extra_fields();
+
+        meta
+    }
+
+    fn parse_extra_fields(&mut self) {
+        for field in self.extra_fields.iter() {
+            match field {
+                ExtraField::UnicodeComment(comment) => {
+                    let Some(com) = self.raw_comment.as_deref() else {
+                        debug_assert!(false);
+                        continue;
+                    };
+                    if comment.header_name_crc32 == crc32fast::hash(com) {
+                        self.comment = Some(comment.comment.into());
+                        self.raw_comment = Some(comment.comment.as_bytes().into());
+                    }
+                }
+
+                ExtraField::UnicodeName(name) => {
+                    if name.header_name_crc32 == crc32fast::hash(&self.raw_name) {
+                        self.name = name.name.into();
+                        self.raw_name = name.name.as_bytes().into();
+                    }
+                }
+
+                ExtraField::Ntfs(ntfs) => {
+                    if let Some(times) = ntfs.times {
+                        self.modification_time = Some(times.mtime);
+                        self.access_time = Some(times.atime);
+                        self.creation_time = Some(times.ctime);
+                    }
+                }
+
+                ExtraField::ExtendedTimestamp(ts) => {
+                    self.modification_time = ts.modification_time;
+                    self.access_time = ts.access_time;
+                    self.creation_time = ts.creation_time;
+                }
+
+                _ => (),
+            }
         }
     }
 
@@ -229,21 +325,45 @@ impl Metadata {
         self.flags & (1 << 3) != 0
     }
 
-    fn uses_utf8(&self) -> bool {
-        self.flags & (1 << 11) != 0
+    pub fn is_dir(&self) -> bool {
+        self.name().ends_with('/')
     }
 
-    pub fn path(&self) -> Cow<str> {
-        if self.uses_utf8() {
-            String::from_utf8_lossy(&self.file_name)
-        } else {
-            crate::cp437::convert(&self.file_name)
-        }
+    pub fn raw_name(&self) -> &[u8] {
+        &self.raw_name
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn raw_comment(&self) -> Option<&[u8]> {
+        self.raw_comment.as_deref()
+    }
+
+    pub fn comment(&self) -> Option<&str> {
+        self.comment.as_deref()
     }
 
     pub fn read_raw<R: Read + Seek>(&self, mut reader: R) -> io::Result<io::Take<R>> {
         reader.seek(io::SeekFrom::Start(self.header_offset.unwrap()))?;
         let header = reader.read_pod::<types::LocalFileHeader>()?;
+
+        if { header.signature } != types::LocalFileHeader::SIGNATURE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid file signature",
+            ));
+        }
+
+        if ({ header.compression_method.get() } != self.compression_method.0)
+            || ({ header.crc32.get() } != self.crc32)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "inconsistent headers",
+            ));
+        }
 
         let extra_data = header.file_name_len.get() as i64 + header.extra_fields_len.get() as i64;
         reader.seek_relative(extra_data)?;
@@ -251,13 +371,14 @@ impl Metadata {
         Ok(reader.take(self.compressed_size))
     }
 
-    pub fn read<R: BufRead + Seek>(&self, reader: R) -> io::Result<impl Read + use<R>> {
-        let raw = self.read_raw(reader)?;
-
-        Ok(Crc32Checker::new(
-            Decompressor::new(raw, self.compression_method)?,
-            self.crc32,
-        ))
+    pub fn read<R: BufRead>(&self, reader: R) -> io::Result<impl Read + use<R>> {
+        Ok(ZipFileReader {
+            reader: Crc32Checker::new(
+                Decompressor::new(reader, self.compression_method)?,
+                self.crc32,
+            ),
+            uncompressed_size: self.uncompressed_size,
+        })
     }
 }
 
@@ -270,7 +391,10 @@ impl fmt::Debug for Metadata {
             .field("uncompressed_size", &self.uncompressed_size)
             .field("compression_method", &self.compression_method)
             .field("external_attributes", &self.external_attributes)
-            .field("name", &String::from_utf8_lossy(&self.file_name))
+            .field("modification_time", &self.modification_time)
+            .field("access_time", &self.access_time)
+            .field("creation_time", &self.creation_time)
+            .field("name", &self.name)
             .field("extra_fields", &self.extra_fields)
             .finish()
     }
@@ -278,7 +402,7 @@ impl fmt::Debug for Metadata {
 
 pub struct ZipArchive<R> {
     inner: RawArchive,
-    paths: HashMap<Box<str>, usize>,
+    names: HashMap<Box<str>, usize>,
     reader: R,
 }
 
@@ -286,18 +410,22 @@ impl<R: BufRead + Seek> ZipArchive<R> {
     pub fn new(mut reader: R) -> io::Result<Self> {
         let inner = RawArchive::open(&mut reader)?;
 
-        let paths = inner
+        let names = inner
             .entries()
             .iter()
             .enumerate()
-            .map(|(i, meta)| (meta.path().into(), i))
+            .map(|(i, meta)| (meta.name().into(), i))
             .collect();
 
         Ok(Self {
             inner,
-            paths,
+            names,
             reader,
         })
+    }
+
+    pub fn entries(&self) -> &[Metadata] {
+        &self.inner.entries
     }
 
     pub fn get_by_index(&mut self, index: usize) -> Option<ZipFile<'_, R>> {
@@ -308,9 +436,13 @@ impl<R: BufRead + Seek> ZipArchive<R> {
         })
     }
 
-    pub fn get_by_name(&mut self, path: &str) -> Option<ZipFile<'_, R>> {
-        let index = *self.paths.get(path)?;
+    pub fn get_by_name(&mut self, name: &str) -> Option<ZipFile<'_, R>> {
+        let index = *self.names.get(name)?;
         self.get_by_index(index)
+    }
+
+    pub fn commment(&self) -> &[u8] {
+        &self.inner.comment
     }
 }
 
@@ -329,6 +461,38 @@ impl<R: BufRead + Seek> ZipFile<'_, R> {
     }
 
     pub fn read(&mut self) -> io::Result<impl Read + '_> {
-        self.metadata.read(&mut *self.reader)
+        let raw = self.metadata.read_raw(&mut *self.reader)?;
+        self.metadata.read(raw)
+    }
+}
+
+struct ZipFileReader<R> {
+    reader: Crc32Checker<Decompressor<R>>,
+    uncompressed_size: u64,
+}
+
+impl<R: BufRead> Read for ZipFileReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.reader.read(buf)?;
+        self.uncompressed_size = self.uncompressed_size.saturating_sub(n as u64);
+        Ok(n)
+    }
+
+    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
+        let size = self
+            .uncompressed_size
+            .try_into()
+            .map_err(|_| io::ErrorKind::OutOfMemory)?;
+        buf.try_reserve(size)?;
+        self.reader.read_to_end(buf)
+    }
+
+    fn read_to_string(&mut self, buf: &mut String) -> io::Result<usize> {
+        let size = self
+            .uncompressed_size
+            .try_into()
+            .map_err(|_| io::ErrorKind::OutOfMemory)?;
+        buf.try_reserve(size)?;
+        self.reader.read_to_string(buf)
     }
 }

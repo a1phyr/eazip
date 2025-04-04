@@ -1,7 +1,5 @@
 use super::ReadExt;
 use crate::{
-    Decompressor,
-    crc32::Crc32Checker,
     read::Metadata,
     types::{CentralFileHeader, LocalFileHeader},
 };
@@ -99,10 +97,7 @@ impl<R: BufRead> ZipFile<'_, R> {
     }
 
     pub fn reader(&mut self) -> io::Result<impl Read + '_> {
-        Ok(Crc32Checker::new(
-            Decompressor::new(&mut self.reader, self.metadata.compression_method)?,
-            self.metadata.crc32,
-        ))
+        self.metadata.read(&mut self.reader)
     }
 }
 
