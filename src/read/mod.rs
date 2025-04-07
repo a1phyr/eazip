@@ -356,9 +356,7 @@ impl Metadata {
             ));
         }
 
-        if ({ header.compression_method.get() } != self.compression_method.0)
-            || ({ header.crc32.get() } != self.crc32)
-        {
+        if ({ header.compression_method.get() } != self.compression_method.0) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "inconsistent headers",
@@ -371,7 +369,7 @@ impl Metadata {
         Ok(reader.take(self.compressed_size))
     }
 
-    pub fn read<R: BufRead>(&self, reader: R) -> io::Result<impl Read + use<R>> {
+    pub fn read_from_raw<R: BufRead>(&self, reader: R) -> io::Result<impl Read + use<R>> {
         Ok(ZipFileReader {
             reader: Crc32Checker::new(
                 Decompressor::new(reader, self.compression_method)?,
@@ -379,6 +377,10 @@ impl Metadata {
             ),
             uncompressed_size: self.uncompressed_size,
         })
+    }
+
+    pub fn read<R: BufRead + Seek>(&self, reader: R) -> io::Result<impl Read + use<R>> {
+        self.read_from_raw(self.read_raw(reader)?)
     }
 }
 
@@ -461,8 +463,7 @@ impl<R: BufRead + Seek> ZipFile<'_, R> {
     }
 
     pub fn read(&mut self) -> io::Result<impl Read + '_> {
-        let raw = self.metadata.read_raw(&mut *self.reader)?;
-        self.metadata.read(raw)
+        self.metadata.read(&mut *self.reader)
     }
 }
 

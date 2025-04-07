@@ -97,7 +97,7 @@ impl<R: BufRead> ZipFile<'_, R> {
     }
 
     pub fn reader(&mut self) -> io::Result<impl Read + '_> {
-        self.metadata.read(&mut self.reader)
+        self.metadata.read_from_raw(&mut self.reader)
     }
 }
 
