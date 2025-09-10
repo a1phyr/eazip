@@ -363,7 +363,8 @@ impl Metadata {
             ));
         }
 
-        let extra_data = header.file_name_len.get() as i64 + header.extra_fields_len.get() as i64;
+        let extra_data =
+            header.file_name_length.get() as i64 + header.extra_fields_length.get() as i64;
         reader.seek_relative(extra_data)?;
 
         Ok(reader.take(self.compressed_size))

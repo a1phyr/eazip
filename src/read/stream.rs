@@ -59,10 +59,12 @@ impl<R: BufRead> ZipArchive<R> {
             }
         }
 
-        let file_name = self.reader.read_variable(header.file_name_len.get() as _)?;
+        let file_name = self
+            .reader
+            .read_variable(header.file_name_length.get() as _)?;
         let extra_fields = self
             .reader
-            .read_variable(header.extra_fields_len.get() as _)?;
+            .read_variable(header.extra_fields_length.get() as _)?;
 
         let metadata = Metadata::from_local_header(header, file_name, extra_fields);
 

@@ -94,8 +94,8 @@ pub struct LocalFileHeader {
     pub crc32: U32,
     pub compressed_size: U32,
     pub uncompressed_size: U32,
-    pub file_name_len: U16,
-    pub extra_fields_len: U16,
+    pub file_name_length: U16,
+    pub extra_fields_length: U16,
 }
 
 unsafe impl Pod for LocalFileHeader {}
