@@ -45,19 +45,11 @@ impl<'a> DataParser<'a> {
 }
 
 #[derive(Clone)]
-pub struct ExtraFields(pub(super) Box<[u8]>);
+pub(crate) struct ExtraFields(pub Box<[u8]>);
 
 impl ExtraFields {
-    pub fn as_raw(&self) -> &[u8] {
-        &self.0
-    }
-
-    pub fn iter_raw(&self) -> impl Iterator<Item = RawExtraField<'_>> + '_ {
-        RawExtraFieldIterator(DataParser(&self.0))
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = ExtraField<'_>> + '_ {
-        ExtraFieldIterator(RawExtraFieldIterator(DataParser(&self.0)))
+    pub fn iter(&self) -> ExtraFieldIterator<'_> {
+        ExtraFieldIterator(DataParser(&self.0))
     }
 }
 
@@ -77,10 +69,10 @@ impl fmt::Debug for ExtraFields {
     }
 }
 
-pub struct RawExtraFieldIterator<'a>(DataParser<'a>);
+pub struct ExtraFieldIterator<'a>(DataParser<'a>);
 
-impl<'a> Iterator for RawExtraFieldIterator<'a> {
-    type Item = RawExtraField<'a>;
+impl<'a> Iterator for ExtraFieldIterator<'a> {
+    type Item = ExtraField<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let id = self.0.read_u16()?;
@@ -88,46 +80,7 @@ impl<'a> Iterator for RawExtraFieldIterator<'a> {
 
         let data = self.0.read_variable(len as usize)?;
 
-        Some(RawExtraField { id, data })
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct RawExtraField<'a> {
-    pub id: u16,
-    pub data: &'a [u8],
-}
-
-impl<'a> RawExtraField<'a> {
-    pub fn parse(self) -> ExtraField<'a> {
-        let field = (|| {
-            let data = DataParser(self.data);
-
-            Some(match self.id {
-                0x0001 => {
-                    ExtraField::Zip64ExtendedInformation(Zip64ExtendedInformation::parse(data)?)
-                }
-                0x000a => ExtraField::Ntfs(Ntfs::parse(data)?),
-                0x5455 => ExtraField::ExtendedTimestamp(ExtendedTimestamp::parse(data)?),
-                0x6375 => ExtraField::UnicodeComment(UnicodeComment::parse(data)?),
-                0x7075 => ExtraField::UnicodeName(UnicodeName::parse(data)?),
-                0x7875 => ExtraField::UnixNew(UnixNew::parse(data)?),
-                0x9901 => ExtraField::Aes(Aes::parse(data)?),
-                _ => ExtraField::Unknown(self),
-            })
-        })();
-
-        field.unwrap_or(ExtraField::Invalid(self))
-    }
-}
-
-pub struct ExtraFieldIterator<'a>(RawExtraFieldIterator<'a>);
-
-impl<'a> Iterator for ExtraFieldIterator<'a> {
-    type Item = ExtraField<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.next().map(RawExtraField::parse)
+        Some(ExtraField::parse(id, data))
     }
 }
 
@@ -141,8 +94,31 @@ pub enum ExtraField<'a> {
     UnixNew(UnixNew<'a>),
     Aes(Aes),
 
-    Invalid(RawExtraField<'a>),
-    Unknown(RawExtraField<'a>),
+    Invalid(u16, &'a [u8]),
+    Unknown(u16, &'a [u8]),
+}
+
+impl<'a> ExtraField<'a> {
+    fn parse(id: u16, data: &'a [u8]) -> Self {
+        let field = (|| {
+            let data = DataParser(data);
+
+            Some(match id {
+                0x0001 => {
+                    ExtraField::Zip64ExtendedInformation(Zip64ExtendedInformation::parse(data)?)
+                }
+                0x000a => ExtraField::Ntfs(Ntfs::parse(data)?),
+                0x5455 => ExtraField::ExtendedTimestamp(ExtendedTimestamp::parse(data)?),
+                0x6375 => ExtraField::UnicodeComment(UnicodeComment::parse(data)?),
+                0x7075 => ExtraField::UnicodeName(UnicodeName::parse(data)?),
+                0x7875 => ExtraField::UnixNew(UnixNew::parse(data)?),
+                0x9901 => ExtraField::Aes(Aes::parse(data)?),
+                _ => ExtraField::Unknown(id, data.0),
+            })
+        })();
+
+        field.unwrap_or(ExtraField::Invalid(id, data))
+    }
 }
 
 #[derive(Debug, Clone)]

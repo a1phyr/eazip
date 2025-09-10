@@ -48,9 +48,8 @@ fn parse_central_directory_header<R: Read>(reader: &mut R) -> io::Result<Metadat
 }
 
 fn find_central_directory_end_in_buffer(
-    buffer_offset: u64,
     buffer: &[u8],
-) -> io::Result<Option<(u64, types::EndOfCentralDirectory, Box<[u8]>)>> {
+) -> io::Result<Option<(types::EndOfCentralDirectory, Box<[u8]>)>> {
     let signature = types::EndOfCentralDirectory::SIGNATURE.as_bytes();
 
     for i in memchr::memmem::rfind_iter(buffer, signature) {
@@ -69,11 +68,7 @@ fn find_central_directory_end_in_buffer(
             ));
         }
 
-        return Ok(Some((
-            buffer_offset + i as u64,
-            record,
-            Box::from(&buffer[i + 22..]),
-        )));
+        return Ok(Some((record, Box::from(&buffer[i + 22..]))));
     }
 
     Ok(None)
@@ -86,7 +81,7 @@ fn not_a_zip() -> io::Error {
 
 fn find_central_directory_end<R: Read + Seek>(
     reader: &mut R,
-) -> io::Result<(u64, types::EndOfCentralDirectory, Box<[u8]>)> {
+) -> io::Result<(types::EndOfCentralDirectory, Box<[u8]>)> {
     let size = reader.seek(io::SeekFrom::End(0))?;
 
     if size < 22 {
@@ -94,11 +89,11 @@ fn find_central_directory_end<R: Read + Seek>(
     }
 
     // Most zip files don't have a comment
-    let buf_start = reader.seek(io::SeekFrom::End(-22))?;
+    reader.seek(io::SeekFrom::End(-22))?;
 
     let record = reader.read_pod::<types::EndOfCentralDirectory>()?;
 
-    if let Some(eocd) = find_central_directory_end_in_buffer(buf_start, record.as_bytes())? {
+    if let Some(eocd) = find_central_directory_end_in_buffer(record.as_bytes())? {
         return Ok(eocd);
     }
 
@@ -109,7 +104,7 @@ fn find_central_directory_end<R: Read + Seek>(
     let mut buffer = vec![0; read_size as usize];
     reader.read_exact(&mut buffer)?;
 
-    if let Some(eocd) = find_central_directory_end_in_buffer(buf_start, &buffer)? {
+    if let Some(eocd) = find_central_directory_end_in_buffer(&buffer)? {
         return Ok(eocd);
     }
 
@@ -118,15 +113,12 @@ fn find_central_directory_end<R: Read + Seek>(
 
 pub struct RawArchive {
     entries: Vec<Metadata>,
-    central_directory_offset: u64,
-    end_of_central_directory_offset: u64,
     comment: Box<[u8]>,
 }
 
 impl RawArchive {
     pub fn open<R: Read + Seek>(mut reader: R) -> io::Result<Self> {
-        let (end_of_central_directory_offset, end_of_central_directory, comment) =
-            find_central_directory_end(&mut reader)?;
+        let (end_of_central_directory, comment) = find_central_directory_end(&mut reader)?;
 
         let central_directory_offset =
             end_of_central_directory.central_directory_offset.get() as u64;
@@ -139,24 +131,11 @@ impl RawArchive {
             entries.push(parse_central_directory_header(&mut reader)?);
         }
 
-        Ok(Self {
-            entries,
-            central_directory_offset,
-            end_of_central_directory_offset,
-            comment,
-        })
+        Ok(Self { entries, comment })
     }
 
     pub fn entries(&self) -> &[Metadata] {
         &self.entries
-    }
-
-    pub fn central_directory_offset(&self) -> u64 {
-        self.central_directory_offset
-    }
-
-    pub fn end_of_central_directory_offset(&self) -> u64 {
-        self.end_of_central_directory_offset
     }
 
     pub fn comment(&self) -> &[u8] {
@@ -184,7 +163,7 @@ pub struct Metadata {
     raw_comment: Option<Box<[u8]>>,
     comment: Option<Box<str>>,
 
-    pub extra_fields: ExtraFields,
+    extra_fields: ExtraFields,
 }
 
 impl Metadata {
@@ -329,20 +308,24 @@ impl Metadata {
         self.name().ends_with('/')
     }
 
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     pub fn raw_name(&self) -> &[u8] {
         &self.raw_name
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
+    pub fn comment(&self) -> Option<&str> {
+        self.comment.as_deref()
     }
 
     pub fn raw_comment(&self) -> Option<&[u8]> {
         self.raw_comment.as_deref()
     }
 
-    pub fn comment(&self) -> Option<&str> {
-        self.comment.as_deref()
+    pub fn extra_fields(&self) -> extra_field::ExtraFieldIterator<'_> {
+        self.extra_fields.iter()
     }
 
     pub fn read_raw<R: Read + Seek>(&self, mut reader: R) -> io::Result<io::Take<R>> {
