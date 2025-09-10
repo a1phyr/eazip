@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-pub fn convert(data: &[u8]) -> Cow<str> {
+pub fn convert(data: &[u8]) -> Cow<'_, str> {
     if data.is_ascii() {
         Cow::Borrowed(std::str::from_utf8(data).unwrap())
     } else {
