@@ -1,6 +1,6 @@
-use std::time::SystemTime;
+use std::{fmt, time::SystemTime};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct Timestamp(pub u64);
 
 impl Timestamp {
@@ -29,5 +29,11 @@ impl Timestamp {
 impl From<SystemTime> for Timestamp {
     fn from(t: SystemTime) -> Self {
         Self(t.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs())
+    }
+}
+
+impl fmt::Debug for Timestamp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Timestamp({})", self.0)
     }
 }
