@@ -4,6 +4,7 @@ mod crc32;
 pub mod read;
 mod types;
 mod utils;
+pub mod write;
 
 pub use compression::{CompressionMethod, Compressor, Decompressor};
 

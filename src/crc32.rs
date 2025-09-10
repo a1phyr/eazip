@@ -1,4 +1,4 @@
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 
 pub struct Crc32Checker<R> {
     hasher: crc32fast::Hasher,
@@ -62,4 +62,38 @@ fn crc32_check_fail() -> io::Error {
         io::ErrorKind::InvalidData,
         "invalid CRC32 check: data was corrupted",
     )
+}
+
+pub struct Crc32Writer<W> {
+    hasher: crc32fast::Hasher,
+    writer: W,
+}
+
+impl<W: Write> Crc32Writer<W> {
+    pub fn new(writer: W) -> Self {
+        Self {
+            hasher: crc32fast::Hasher::new(),
+            writer,
+        }
+    }
+
+    pub fn into_inner(self) -> W {
+        self.writer
+    }
+
+    pub fn result(&self) -> u32 {
+        self.hasher.clone().finalize()
+    }
+}
+
+impl<W: Write> Write for Crc32Writer<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let n = self.writer.write(buf)?;
+        self.hasher.update(&buf[..n]);
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.writer.flush()
+    }
 }
