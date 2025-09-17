@@ -66,7 +66,7 @@ impl<R: BufRead> ZipArchive<R> {
             .reader
             .read_variable(header.extra_fields_length.get() as _)?;
 
-        let metadata = Metadata::from_local_header(header, file_name, extra_fields);
+        let metadata = Metadata::from_local_header(header, file_name, extra_fields)?;
 
         if (metadata.flags & 8) != 0 {
             return Err(io::Error::new(

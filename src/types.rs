@@ -174,6 +174,21 @@ impl EndOfCentralDirectory64 {
 unsafe impl Pod for EndOfCentralDirectory64 {}
 
 #[derive(Debug, Clone, Copy)]
+#[repr(C, packed(4))]
+pub struct EndOfCentralDirectory64Locator {
+    signature: U32,
+    disk_with_central_directory: U32,
+    central_directory_64_offset: U64,
+    total_disks: U32,
+}
+
+impl EndOfCentralDirectory64Locator {
+    pub const SIGNATURE: U32 = U32::set(0x07064b50);
+}
+
+unsafe impl Pod for EndOfCentralDirectory64Locator {}
+
+#[derive(Debug, Clone, Copy)]
 #[repr(C, packed(2))]
 pub struct EndOfCentralDirectory {
     pub signature: U32,

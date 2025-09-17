@@ -39,12 +39,7 @@ fn parse_central_directory_header<R: Read>(reader: &mut R) -> io::Result<Metadat
     let extra_fields = reader.read_variable(header.extra_fields_length.get() as _)?;
     let comment = reader.read_variable(header.file_comment_length.get() as _)?;
 
-    Ok(Metadata::from_central_header(
-        header,
-        file_name,
-        extra_fields,
-        comment,
-    ))
+    Metadata::from_central_header(header, file_name, extra_fields, comment)
 }
 
 fn find_central_directory_end_in_buffer(
@@ -64,8 +59,12 @@ fn find_central_directory_end_in_buffer(
         if record.disk_number.get() != 0 || record.disk_with_central_directory.get() != 0 {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
-                "muli-file zip are not supported",
+                "multi-file zip are not supported",
             ));
+        }
+
+        if record.total_entries != record.entries_on_this_disk {
+            return Err(invalid_zip());
         }
 
         return Ok(Some((record, Box::from(&buffer[i + 22..]))));
@@ -77,6 +76,16 @@ fn find_central_directory_end_in_buffer(
 #[cold]
 fn not_a_zip() -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "not a zip archive")
+}
+
+#[cold]
+fn invalid_entry() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, "invalid entry")
+}
+
+#[cold]
+fn invalid_zip() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, "invalid zip archive")
 }
 
 fn find_central_directory_end<R: Read + Seek>(
@@ -171,9 +180,13 @@ impl Metadata {
         header: types::LocalFileHeader,
         file_name: Box<[u8]>,
         extra_fields: Box<[u8]>,
-    ) -> Self {
+    ) -> io::Result<Self> {
         let flags = header.flags.get();
         let is_unicode = flags & (1 << 11) != 0;
+
+        if { header.signature } != types::LocalFileHeader::SIGNATURE {
+            return Err(invalid_entry());
+        }
 
         let name = if is_unicode {
             String::from_utf8_lossy(&file_name)
@@ -203,9 +216,9 @@ impl Metadata {
             extra_fields: ExtraFields(extra_fields),
         };
 
-        meta.parse_extra_fields();
+        meta.parse_extra_fields().ok_or_else(invalid_entry)?;
 
-        meta
+        Ok(meta)
     }
 
     pub(crate) fn from_central_header(
@@ -213,9 +226,15 @@ impl Metadata {
         raw_name: Box<[u8]>,
         extra_fields: Box<[u8]>,
         raw_comment: Box<[u8]>,
-    ) -> Self {
+    ) -> io::Result<Self> {
         let flags = header.flags.get();
         let is_unicode = flags & (1 << 11) != 0;
+
+        if { header.signature } != types::CentralFileHeader::SIGNATURE
+            || header.disk_number.get() != 0
+        {
+            return Err(invalid_entry());
+        }
 
         let (name, comment) = if is_unicode {
             (
@@ -251,20 +270,30 @@ impl Metadata {
             extra_fields: ExtraFields(extra_fields),
         };
 
-        meta.parse_extra_fields();
+        meta.parse_extra_fields().ok_or_else(invalid_entry)?;
 
-        meta
+        Ok(meta)
     }
 
-    fn parse_extra_fields(&mut self) {
+    fn parse_extra_fields(&mut self) -> Option<()> {
         for field in self.extra_fields.iter() {
             match field {
+                ExtraField::Zip64ExtendedInformation(mut info) => {
+                    if self.uncompressed_size == 0xffff_ffff {
+                        self.uncompressed_size = info.next()?;
+                    }
+                    if self.compressed_size == 0xffff_ffff {
+                        self.compressed_size = info.next()?;
+                    }
+                    if self.header_offset == Some(0xffff_ffff) {
+                        self.header_offset = Some(info.next()?);
+                    }
+                    // Disk number must be 0
+                    info.end()?;
+                }
                 ExtraField::UnicodeComment(comment) => {
-                    let Some(com) = self.raw_comment.as_deref() else {
-                        debug_assert!(false);
-                        continue;
-                    };
-                    if comment.header_name_crc32 == crc32fast::hash(com) {
+                    let raw_comment = self.raw_comment.as_deref()?;
+                    if comment.header_name_crc32 == crc32fast::hash(raw_comment) {
                         self.comment = Some(comment.comment.into());
                         self.raw_comment = Some(comment.comment.as_bytes().into());
                     }
@@ -294,6 +323,8 @@ impl Metadata {
                 _ => (),
             }
         }
+
+        Some(())
     }
 
     pub fn is_encrypted(&self) -> bool {

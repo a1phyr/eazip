@@ -6,6 +6,7 @@ use std::fmt;
 
 use crate::utils::Timestamp;
 
+#[derive(Clone)]
 struct DataParser<'a>(&'a [u8]);
 
 impl<'a> DataParser<'a> {
@@ -86,7 +87,7 @@ impl<'a> Iterator for ExtraFieldIterator<'a> {
 
 #[derive(Debug, Clone)]
 pub enum ExtraField<'a> {
-    Zip64ExtendedInformation(Zip64ExtendedInformation),
+    Zip64ExtendedInformation(Zip64ExtendedInformation<'a>),
     Ntfs(Ntfs),
     ExtendedTimestamp(ExtendedTimestamp),
     UnicodeComment(UnicodeComment<'a>),
@@ -121,29 +122,30 @@ impl<'a> ExtraField<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Zip64ExtendedInformation {
-    pub original_size: u64,
-    pub compressed_size: u64,
-    pub local_header_offset: u64,
-    pub disk_start_number: u32,
+#[derive(Clone)]
+pub struct Zip64ExtendedInformation<'a> {
+    info: DataParser<'a>,
 }
 
-impl Zip64ExtendedInformation {
-    fn parse(mut data: DataParser<'_>) -> Option<Self> {
-        let original_size = data.read_u64()?;
-        let compressed_size = data.read_u64()?;
-        let local_header_offset = data.read_u64()?;
-        let disk_start_number = data.read_u32()?;
+impl<'a> Zip64ExtendedInformation<'a> {
+    fn parse(data: DataParser<'a>) -> Option<Self> {
+        Some(Self { info: data })
+    }
 
-        data.end()?;
+    pub(crate) fn next(&mut self) -> Option<u64> {
+        self.info.read_u64()
+    }
 
-        Some(Self {
-            original_size,
-            compressed_size,
-            local_header_offset,
-            disk_start_number,
-        })
+    pub(crate) fn end(self) -> Option<()> {
+        self.info.end()
+    }
+}
+
+impl<'a> fmt::Debug for Zip64ExtendedInformation<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Zip64ExtendedInformation")
+            .field("info", &self.info.0)
+            .finish()
     }
 }
 
