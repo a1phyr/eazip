@@ -5,7 +5,7 @@ pub struct Timestamp(pub u64);
 
 impl Timestamp {
     pub fn now() -> Self {
-        Self::from(SystemTime::now())
+        Self::from_std(SystemTime::now())
     }
 
     pub fn from_ntfs(time: u64) -> Self {
@@ -21,14 +21,12 @@ impl Timestamp {
         Self(time)
     }
 
+    pub fn from_std(t: SystemTime) -> Self {
+        Self(t.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs())
+    }
+
     pub fn to_std(self) -> SystemTime {
         SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(self.0)
-    }
-}
-
-impl From<SystemTime> for Timestamp {
-    fn from(t: SystemTime) -> Self {
-        Self(t.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs())
     }
 }
 

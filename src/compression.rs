@@ -22,6 +22,18 @@ impl fmt::Debug for CompressionMethod {
     }
 }
 
+impl Default for CompressionMethod {
+    fn default() -> Self {
+        if cfg!(feature = "zstd") {
+            Self::ZSTD
+        } else if cfg!(feature = "deflate") {
+            Self::DEFLATE
+        } else {
+            Self::STORE
+        }
+    }
+}
+
 impl CompressionMethod {
     pub const STORE: Self = Self(0);
     pub const DEFLATE: Self = Self(8);
@@ -74,6 +86,16 @@ impl<R: io::BufRead> Decompressor<R> {
         };
 
         Ok(Self(inner))
+    }
+
+    pub fn compression_method(&self) -> CompressionMethod {
+        match self.0 {
+            DecompressorImpl::Store(_) => CompressionMethod::STORE,
+            #[cfg(feature = "deflate")]
+            DecompressorImpl::Deflate(_) => CompressionMethod::DEFLATE,
+            #[cfg(feature = "zstd")]
+            DecompressorImpl::Zstd(_) => CompressionMethod::ZSTD,
+        }
     }
 
     pub fn get_mut(&mut self) -> &mut R {
@@ -144,6 +166,16 @@ impl<W: io::Write> Compressor<W> {
         };
 
         Ok(Self(inner))
+    }
+
+    pub fn compression_method(&self) -> CompressionMethod {
+        match self.0 {
+            CompressorImpl::Store(_) => CompressionMethod::STORE,
+            #[cfg(feature = "deflate")]
+            CompressorImpl::Deflate(_) => CompressionMethod::DEFLATE,
+            #[cfg(feature = "zstd")]
+            CompressorImpl::Zstd(_) => CompressionMethod::ZSTD,
+        }
     }
 
     pub fn get_mut(&mut self) -> &mut W {

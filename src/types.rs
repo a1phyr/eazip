@@ -2,19 +2,27 @@
 
 use std::fmt;
 
-pub unsafe trait Pod: Copy + 'static {
-    fn zeroed() -> Self {
+pub unsafe trait Pod: 'static {
+    fn zeroed() -> Self
+    where
+        Self: Sized,
+    {
         unsafe { std::mem::zeroed() }
     }
 
     fn as_bytes(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self as *const _ as *const u8, size_of::<Self>()) }
+        let size = size_of_val(self);
+        unsafe { std::slice::from_raw_parts(self as *const _ as *const u8, size) }
     }
 
     fn as_bytes_mut(&mut self) -> &mut [u8] {
-        unsafe { std::slice::from_raw_parts_mut(self as *mut _ as *mut u8, size_of::<Self>()) }
+        let size = size_of_val(self);
+        unsafe { std::slice::from_raw_parts_mut(self as *mut _ as *mut u8, size) }
     }
 }
+
+unsafe impl<T: Pod> Pod for [T] {}
+unsafe impl<T: Pod, const N: usize> Pod for [T; N] {}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
@@ -107,6 +115,7 @@ impl LocalFileHeader {
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed(4))]
 pub struct DataDescriptor32 {
+    pub signature: U32,
     pub crc32: U32,
     pub compressed_size: U32,
     pub uncompressed_size: U32,
@@ -114,15 +123,24 @@ pub struct DataDescriptor32 {
 
 unsafe impl Pod for DataDescriptor32 {}
 
+impl DataDescriptor32 {
+    pub const SIGNATURE: U32 = U32::set(0x08074B50);
+}
+
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed(4))]
 pub struct DataDescriptor64 {
+    pub signature: U32,
     pub crc32: U32,
     pub compressed_size: U64,
     pub uncompressed_size: U64,
 }
 
 unsafe impl Pod for DataDescriptor64 {}
+
+impl DataDescriptor64 {
+    pub const SIGNATURE: U32 = U32::set(0x08074B50);
+}
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed(2))]
