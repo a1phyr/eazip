@@ -150,6 +150,24 @@ impl RawArchive {
     pub fn comment(&self) -> &[u8] {
         &self.comment
     }
+
+    pub fn extract<R: BufRead + Seek>(
+        &self,
+        mut reader: R,
+        at: &std::path::Path,
+    ) -> io::Result<()> {
+        match std::fs::create_dir(at) {
+            Ok(()) => (),
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => (),
+            Err(err) => return Err(err),
+        };
+
+        for entry in &self.entries {
+            entry.extract(&mut reader, at)?;
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
@@ -410,6 +428,23 @@ impl Metadata {
     pub fn read<R: BufRead + Seek>(&self, reader: R) -> io::Result<impl Read + use<R>> {
         self.read_from_raw(self.read_raw(reader)?)
     }
+
+    pub fn extract<R: BufRead + Seek>(&self, reader: R, at: &std::path::Path) -> io::Result<()> {
+        let path = at.join(self.safe_name().ok_or_else(
+            #[cold]
+            || io::Error::new(io::ErrorKind::InvalidData, "invalid path in archive"),
+        )?);
+
+        if self.is_dir() {
+            std::fs::create_dir_all(path)?;
+        } else {
+            std::fs::create_dir_all(path.parent().unwrap())?;
+            let mut f = std::fs::File::create_new(&path)?;
+            io::copy(&mut self.read(reader)?, &mut f)?;
+        };
+
+        Ok(())
+    }
 }
 
 impl fmt::Debug for Metadata {
@@ -473,6 +508,10 @@ impl<R: BufRead + Seek> ZipArchive<R> {
 
     pub fn commment(&self) -> &[u8] {
         &self.inner.comment
+    }
+
+    pub fn extract(&mut self, at: impl AsRef<std::path::Path>) -> io::Result<()> {
+        self.inner.extract(&mut self.reader, at.as_ref())
     }
 }
 
