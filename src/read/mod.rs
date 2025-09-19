@@ -331,16 +331,29 @@ impl Metadata {
         self.flags & (1 << 0) != 0
     }
 
-    pub fn has_descriptor(&self) -> bool {
-        self.flags & (1 << 3) != 0
-    }
-
     pub fn is_dir(&self) -> bool {
-        self.name().ends_with('/')
+        self.name.ends_with('/')
     }
 
-    pub fn name(&self) -> &str {
+    pub fn display_name(&self) -> &str {
         &self.name
+    }
+
+    pub fn safe_name(&self) -> Option<&str> {
+        if std::path::Path::new(&*self.name).has_root() || self.name.contains(['\\']) {
+            return None;
+        }
+
+        let mut depth = 0u32;
+        for part in self.name.split('/') {
+            match part {
+                "." => (),
+                ".." => depth = depth.checked_sub(1)?,
+                _ => depth += 1,
+            }
+        }
+
+        Some(&self.name)
     }
 
     pub fn raw_name(&self) -> &[u8] {
@@ -370,7 +383,7 @@ impl Metadata {
             ));
         }
 
-        if ({ header.compression_method.get() } != self.compression_method.0) {
+        if header.compression_method.get() != self.compression_method.0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "inconsistent headers",
@@ -431,7 +444,7 @@ impl<R: BufRead + Seek> ZipArchive<R> {
             .entries()
             .iter()
             .enumerate()
-            .map(|(i, meta)| (meta.name().into(), i))
+            .map(|(i, meta)| (meta.display_name().into(), i))
             .collect();
 
         Ok(Self {
