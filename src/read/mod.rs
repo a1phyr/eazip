@@ -168,6 +168,28 @@ impl RawArchive {
 
         Ok(())
     }
+
+    #[cfg(feature = "parallel")]
+    pub fn parallel_extract<R: sync_file::ReadAt + sync_file::Size + Sync>(
+        &self,
+        reader: R,
+        at: &std::path::Path,
+    ) -> io::Result<()> {
+        use rayon::prelude::*;
+
+        match std::fs::create_dir(at) {
+            Ok(()) => (),
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => (),
+            Err(err) => return Err(err),
+        };
+
+        self.entries.par_iter().try_for_each(|entry| {
+            let reader = io::BufReader::new(sync_file::Adapter::new(&reader));
+            entry.extract(reader, at)
+        })?;
+
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
@@ -512,6 +534,14 @@ impl<R: BufRead + Seek> ZipArchive<R> {
 
     pub fn extract(&mut self, at: impl AsRef<std::path::Path>) -> io::Result<()> {
         self.inner.extract(&mut self.reader, at.as_ref())
+    }
+
+    #[cfg(feature = "parallel")]
+    pub fn parallel_extract(&self, at: impl AsRef<std::path::Path>) -> io::Result<()>
+    where
+        R: sync_file::ReadAt + sync_file::Size + Sync,
+    {
+        self.inner.parallel_extract(&self.reader, at.as_ref())
     }
 }
 

@@ -13,9 +13,14 @@ default = ["deflate", "zstd"]
 deflate = ["dep:flate2"]
 zstd = ["dep:zstd"]
 
+parallel = ["dep:rayon", "dep:sync_file"]
+
 
 [dependencies]
 crc32fast = "1.4.2"
 flate2 = { version = "1.1.0", optional = true }
 memchr = "2.7.4"
 zstd = { version = "0.13.3", optional = true }
+
+rayon = { version = "1.10", optional = true }
+sync_file = { version = "0.3", optional = true }
