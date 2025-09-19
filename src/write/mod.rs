@@ -1,9 +1,8 @@
 use crate::{
     CompressionMethod,
     compression::Compressor,
-    crc32::Crc32Writer,
     types::{self, Pod},
-    utils::Counter,
+    utils::{Counter, Crc32Writer},
 };
 use std::io::{self, Write};
 

@@ -1,3 +1,8 @@
+pub mod cp437;
+mod crc32;
+
+pub use crc32::{Crc32Checker, Crc32Writer};
+
 use std::{fmt, io, time::SystemTime};
 
 #[derive(Clone, Copy)]

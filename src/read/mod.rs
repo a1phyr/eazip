@@ -7,9 +7,8 @@ use std::{
 
 use crate::{
     CompressionMethod, Decompressor,
-    crc32::Crc32Checker,
     types::{self, Pod},
-    utils::Timestamp,
+    utils::{Crc32Checker, Timestamp, cp437},
 };
 
 pub mod extra_field;
@@ -234,7 +233,7 @@ impl Metadata {
         let name = if is_unicode {
             String::from_utf8_lossy(&file_name)
         } else {
-            crate::cp437::convert(&file_name)
+            cp437::convert(&file_name)
         };
 
         let mut meta = Self {
@@ -287,10 +286,7 @@ impl Metadata {
                 String::from_utf8_lossy(&raw_comment),
             )
         } else {
-            (
-                crate::cp437::convert(&raw_name),
-                crate::cp437::convert(&raw_comment),
-            )
+            (cp437::convert(&raw_name), cp437::convert(&raw_comment))
         };
 
         let mut meta = Self {
