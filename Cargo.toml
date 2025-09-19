@@ -8,8 +8,9 @@ readme = "README.md"
 
 
 [features]
-default = ["deflate", "zstd"]
+default = ["deflate", "zstd", "std"]
 
+std = []
 deflate = ["dep:flate2"]
 zstd = ["dep:zstd"]
 
