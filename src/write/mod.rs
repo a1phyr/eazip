@@ -20,13 +20,24 @@ impl<W: Write> WriteExt for W {}
 pub struct FileOptions {
     pub compression_method: CompressionMethod,
     pub level: Option<i32>,
-    pub force_zip_64: bool,
 }
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed(4))]
-struct Zip64 {
+struct LocalZip64 {
+    id: types::U16,
+    size: types::U16,
+    uncompressed_size: types::U64,
+    compressed_size: types::U64,
+}
+
+unsafe impl Pod for LocalZip64 {}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed(4))]
+struct CentralZip64 {
     id: types::U16,
     size: types::U16,
     uncompressed_size: types::U64,
@@ -34,41 +45,7 @@ struct Zip64 {
     local_header_offset: types::U64,
 }
 
-unsafe impl Pod for Zip64 {}
-
-fn convert_sizes(
-    force_zip64: bool,
-    compressed: u64,
-    uncompressed: u64,
-    local_header: u64,
-) -> (types::U32, types::U32, types::U32, Option<Zip64>) {
-    if let (Ok(compressed), Ok(uncompressed), Ok(local_header_offset), false) = (
-        compressed.try_into(),
-        uncompressed.try_into(),
-        local_header.try_into(),
-        force_zip64,
-    ) {
-        (
-            types::U32::set(compressed),
-            types::U32::set(uncompressed),
-            types::U32::set(local_header_offset),
-            None,
-        )
-    } else {
-        (
-            types::U32::set(0xffff_ffff),
-            types::U32::set(0xffff_ffff),
-            types::U32::set(0xffff_ffff),
-            Some(Zip64 {
-                id: types::U16::set(0x0001),
-                size: types::U16::set(24),
-                compressed_size: types::U64::set(compressed),
-                uncompressed_size: types::U64::set(uncompressed),
-                local_header_offset: types::U64::set(local_header),
-            }),
-        )
-    }
-}
+unsafe impl Pod for CentralZip64 {}
 
 #[derive(Default)]
 struct RawArchiveWriter {
@@ -94,16 +71,22 @@ impl RawArchiveWriter {
         name: &str,
         compression_method: CompressionMethod,
         flags: u16,
-        compressed_size: types::U32,
-        uncompressed_size: types::U32,
-        crc32: types::U32,
-        extra: &[u8],
+        compressed_size: u64,
+        uncompressed_size: u64,
+        crc32: u32,
     ) -> io::Result<()> {
         let Ok(name_len) = name.len().try_into() else {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidFilename,
                 "file name too long",
             ));
+        };
+
+        let zip64 = LocalZip64 {
+            id: types::U16::set(0x0001),
+            size: types::U16::set(16),
+            compressed_size: types::U64::set(compressed_size),
+            uncompressed_size: types::U64::set(uncompressed_size),
         };
 
         writer.write_pod(&types::LocalFileHeader {
@@ -113,15 +96,15 @@ impl RawArchiveWriter {
             compression_method: types::U16::set(compression_method.0),
             last_modified_time: types::U16::set(0),
             last_modified_date: types::U16::set(0),
-            crc32,
-            compressed_size,
-            uncompressed_size,
+            crc32: types::U32::set(crc32),
+            compressed_size: types::U32::set(0xffff_ffff),
+            uncompressed_size: types::U32::set(0xffff_ffff),
             file_name_length: types::U16::set(name_len),
-            extra_fields_length: types::U16::set(extra.len() as _),
+            extra_fields_length: types::U16::set(size_of::<LocalZip64>() as _),
         })?;
 
         writer.write_all(name.as_bytes())?;
-        writer.write_all(extra)?;
+        writer.write_all(zip64.as_bytes())?;
 
         Ok(())
     }
@@ -131,41 +114,48 @@ impl RawArchiveWriter {
         name: &str,
         compression_method: CompressionMethod,
         flags: u16,
-        compressed_size: types::U32,
-        uncompressed_size: types::U32,
-        local_header_offset: types::U32,
-        crc32: types::U32,
-        extra: &[u8],
+        compressed_size: u64,
+        uncompressed_size: u64,
+        local_header_offset: u64,
+        crc32: u32,
     ) {
         self.n_entries += 1;
 
         debug_assert!(name.len() < u16::MAX as usize);
 
+        let zip64 = CentralZip64 {
+            id: types::U16::set(0x0001),
+            size: types::U16::set(24),
+            compressed_size: types::U64::set(compressed_size),
+            uncompressed_size: types::U64::set(uncompressed_size),
+            local_header_offset: types::U64::set(local_header_offset),
+        };
+
         self.central_headers.extend_from_slice(
             types::CentralFileHeader {
                 signature: types::CentralFileHeader::SIGNATURE,
-                made_by: types::U16::set(0x0300), // Unix
-                version_needed: types::U16::set(45),
+                made_by: types::U16::set(0x0300),    // Unix
+                version_needed: types::U16::set(45), // Version 4.5 for Zip64 support
                 flags: types::U16::set((1 << 11) | flags),
                 compression_method: types::U16::set(compression_method.0),
                 last_modified_time: types::U16::set(0),
                 last_modified_date: types::U16::set(0),
-                crc32,
-                compressed_size,
-                uncompressed_size,
+                crc32: types::U32::set(crc32),
+                compressed_size: types::U32::set(0xffff_ffff),
+                uncompressed_size: types::U32::set(0xffff_ffff),
                 file_name_length: types::U16::set(name.len() as _),
-                extra_fields_length: types::U16::set(extra.len() as _),
+                extra_fields_length: types::U16::set(size_of::<CentralZip64>() as _),
                 file_comment_length: types::U16::set(0),
                 disk_number: types::U16::set(0),
                 internal_attributes: types::U16::set(1), // "Binary Data" flag
                 external_attributes: types::U32::set(0),
-                local_header_offset,
+                local_header_offset: types::U32::set(0xffff_ffff),
             }
             .as_bytes(),
         );
 
         self.central_headers.extend_from_slice(name.as_bytes());
-        self.central_headers.extend_from_slice(extra);
+        self.central_headers.extend_from_slice(zip64.as_bytes());
     }
 
     fn finish<W: Write>(self, writer: &mut Counter<W>) -> io::Result<()> {
@@ -221,15 +211,11 @@ impl<W: Write> ArchiveWriter<W> {
             options.level,
         )?);
         let uncompressed_size = io::copy(&mut content, &mut w)?;
-        let crc32 = types::U32::set(w.result());
+        let crc32 = w.result();
         let compressed = w.into_inner().finish()?;
 
-        let (compressed_size, uncompressed_size, local_header_offset, zip64) = convert_sizes(
-            options.force_zip_64,
-            compressed.len() as u64,
-            uncompressed_size,
-            self.writer.amt,
-        );
+        let compressed_size = compressed.len() as u64;
+        let local_header_offset = self.writer.amt;
 
         self.raw.error = true;
 
@@ -241,7 +227,6 @@ impl<W: Write> ArchiveWriter<W> {
             compressed_size,
             uncompressed_size,
             crc32,
-            zip64.as_slice().as_bytes(),
         )?;
 
         self.writer.write_all(&compressed)?;
@@ -254,7 +239,6 @@ impl<W: Write> ArchiveWriter<W> {
             uncompressed_size,
             local_header_offset,
             crc32,
-            zip64.as_slice().as_bytes(),
         );
 
         self.raw.error = false;
@@ -278,10 +262,9 @@ impl<W: Write> ArchiveWriter<W> {
             name,
             options.compression_method,
             1 << 3,
-            types::U32::set(0),
-            types::U32::set(0),
-            types::U32::set(0),
-            [types::U16::set(0x0001), types::U16::set(0)].as_bytes(),
+            0,
+            0,
+            0,
         )?;
 
         Ok(FileStreamer {
@@ -313,7 +296,6 @@ impl<W: Write> ArchiveWriter<W> {
             &FileOptions {
                 compression_method: CompressionMethod::STORE,
                 level: None,
-                force_zip_64: false,
             },
         )?;
 
@@ -352,25 +334,21 @@ impl<W: Write> Write for FileStreamer<'_, W> {
 
 impl<W: Write> FileStreamer<'_, W> {
     pub fn finish(self) -> io::Result<()> {
-        let crc32 = types::U32::set(self.writer.inner.result());
+        let crc32 = self.writer.inner.result();
 
         let writer = self.writer.inner.into_inner();
         let compression_method = writer.compression_method();
         let writer = writer.finish()?;
 
-        let (compressed_size, uncompressed_size, local_header_offset, zip64) = convert_sizes(
-            true,
-            writer.amt - self.started_at,
-            self.writer.amt,
-            self.local_header_offset,
-        );
-        let zip64 = zip64.unwrap();
+        let compressed_size = writer.amt - self.started_at;
+        let uncompressed_size = self.writer.amt;
+        let local_header_offset = self.local_header_offset;
 
         writer.write_pod(&types::DataDescriptor64 {
             signature: types::DataDescriptor64::SIGNATURE,
-            crc32,
-            compressed_size: zip64.compressed_size,
-            uncompressed_size: zip64.uncompressed_size,
+            crc32: types::U32::set(crc32),
+            compressed_size: types::U64::set(compressed_size),
+            uncompressed_size: types::U64::set(uncompressed_size),
         })?;
 
         self.raw.push_central_header(
@@ -381,7 +359,6 @@ impl<W: Write> FileStreamer<'_, W> {
             uncompressed_size,
             local_header_offset,
             crc32,
-            zip64.as_bytes(),
         );
 
         self.raw.error = false;
