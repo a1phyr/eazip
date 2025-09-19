@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     fmt,
     io::{self, BufRead, Read, Seek},
+    sync::atomic,
 };
 
 use crate::{
@@ -192,14 +193,15 @@ impl RawArchive {
     }
 }
 
-#[derive(Clone)]
 pub struct Metadata {
-    pub crc32: u32,
     flags: u16,
     header_offset: u64,
+    data_offset: atomic::AtomicU64,
+
     pub compressed_size: u64,
     pub uncompressed_size: u64,
     pub compression_method: CompressionMethod,
+    pub crc32: u32,
     external_attributes: Option<u32>,
 
     pub modification_time: Option<Timestamp>,
@@ -239,6 +241,8 @@ impl Metadata {
             crc32: header.crc32.get(),
             flags,
             header_offset,
+            data_offset: atomic::AtomicU64::new(header_offset + header.total_size()),
+
             compressed_size: header.compressed_size.get() as u64,
             uncompressed_size: header.uncompressed_size.get() as u64,
             compression_method: CompressionMethod(header.compression_method.get()),
@@ -293,6 +297,8 @@ impl Metadata {
             crc32: header.crc32.get(),
             flags,
             header_offset: header.local_header_offset.get() as u64,
+            data_offset: atomic::AtomicU64::new(0),
+
             compressed_size: header.compressed_size.get() as u64,
             uncompressed_size: header.uncompressed_size.get() as u64,
             compression_method: CompressionMethod(header.compression_method.get()),
@@ -413,27 +419,36 @@ impl Metadata {
         self.extra_fields.iter()
     }
 
-    pub fn read_raw<R: Read + Seek>(&self, mut reader: R) -> io::Result<io::Take<R>> {
+    #[cold]
+    pub fn set_data_offset<R: Read + Seek>(&self, reader: &mut R) -> io::Result<()> {
         reader.seek(io::SeekFrom::Start(self.header_offset))?;
         let header = reader.read_pod::<types::LocalFileHeader>()?;
 
-        if { header.signature } != types::LocalFileHeader::SIGNATURE {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "invalid file signature",
-            ));
+        if { header.signature } != types::LocalFileHeader::SIGNATURE
+            || header.compression_method.get() != self.compression_method.0
+        {
+            return Err(invalid_entry());
         }
 
-        if header.compression_method.get() != self.compression_method.0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "inconsistent headers",
-            ));
-        }
-
-        let extra_data =
-            header.file_name_length.get() as i64 + header.extra_fields_length.get() as i64;
+        let extra_data = (header.file_name_length.get() + header.extra_fields_length.get()) as i64;
         reader.seek_relative(extra_data)?;
+
+        self.data_offset.store(
+            self.header_offset + header.total_size(),
+            atomic::Ordering::Relaxed,
+        );
+
+        Ok(())
+    }
+
+    pub fn read_raw<R: Read + Seek>(&self, mut reader: R) -> io::Result<io::Take<R>> {
+        // This check is racy but that's fine
+        match self.data_offset.load(atomic::Ordering::Relaxed) {
+            0 => self.set_data_offset(&mut reader)?,
+            n => {
+                reader.seek(io::SeekFrom::Start(n))?;
+            }
+        }
 
         Ok(reader.take(self.compressed_size))
     }
@@ -483,6 +498,7 @@ impl fmt::Debug for Metadata {
             .field("access_time", &self.access_time)
             .field("creation_time", &self.creation_time)
             .field("name", &self.name)
+            .field("comment", &self.comment)
             .field("extra_fields", &self.extra_fields)
             .finish()
     }

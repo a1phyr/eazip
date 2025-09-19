@@ -110,6 +110,12 @@ unsafe impl Pod for LocalFileHeader {}
 
 impl LocalFileHeader {
     pub const SIGNATURE: U32 = U32::set(0x04034b50);
+
+    pub fn total_size(&self) -> u64 {
+        size_of::<Self>() as u64
+            + self.file_name_length.get() as u64
+            + self.extra_fields_length.get() as u64
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
