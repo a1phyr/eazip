@@ -3,32 +3,9 @@ use crate::{
     compression::Compressor,
     crc32::Crc32Writer,
     types::{self, Pod},
+    utils::Counter,
 };
 use std::io::{self, Write};
-
-#[derive(Default)]
-struct Counter<W> {
-    amt: u64,
-    writer: W,
-}
-
-impl<W> Counter<W> {
-    pub const fn new(writer: W) -> Self {
-        Self { amt: 0, writer }
-    }
-}
-
-impl<W: Write> Write for Counter<W> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let n = self.writer.write(buf)?;
-        self.amt += n as u64;
-        Ok(n)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.writer.flush()
-    }
-}
 
 trait WriteExt: Write {
     fn write_pod<T: Pod>(&mut self, data: &T) -> io::Result<()> {
@@ -349,7 +326,7 @@ impl<W: Write> ArchiveWriter<W> {
 
     pub fn finish(mut self) -> io::Result<W> {
         self.raw.finish(&mut self.writer)?;
-        Ok(self.writer.writer)
+        Ok(self.writer.inner)
     }
 }
 
@@ -375,9 +352,9 @@ impl<W: Write> Write for FileStreamer<'_, W> {
 
 impl<W: Write> FileStreamer<'_, W> {
     pub fn finish(self) -> io::Result<()> {
-        let crc32 = types::U32::set(self.writer.writer.result());
+        let crc32 = types::U32::set(self.writer.inner.result());
 
-        let writer = self.writer.writer.into_inner();
+        let writer = self.writer.inner.into_inner();
         let compression_method = writer.compression_method();
         let writer = writer.finish()?;
 

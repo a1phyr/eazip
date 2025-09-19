@@ -2,8 +2,8 @@ use super::ReadExt;
 use crate::{
     read::Metadata,
     types::{CentralFileHeader, LocalFileHeader},
+    utils::Counter,
 };
-
 use std::io::{self, BufRead, Read};
 
 fn skip<R: BufRead>(r: R, amt: u64) -> io::Result<()> {
@@ -28,14 +28,14 @@ fn skip<R: BufRead>(r: R, amt: u64) -> io::Result<()> {
 }
 
 pub struct ZipArchive<R: BufRead> {
-    reader: R,
+    reader: Counter<R>,
     data_left: u64,
 }
 
 impl<R: BufRead> ZipArchive<R> {
     pub fn new(reader: R) -> Self {
         Self {
-            reader,
+            reader: Counter::new(reader),
             data_left: 0,
         }
     }
@@ -46,6 +46,7 @@ impl<R: BufRead> ZipArchive<R> {
             self.data_left = 0;
         }
 
+        let offset = self.reader.amt;
         let header = self.reader.read_pod::<LocalFileHeader>()?;
 
         match header.signature {
@@ -66,7 +67,7 @@ impl<R: BufRead> ZipArchive<R> {
             .reader
             .read_variable(header.extra_fields_length.get() as _)?;
 
-        let metadata = Metadata::from_local_header(header, file_name, extra_fields)?;
+        let metadata = Metadata::from_local_header(header, offset, file_name, extra_fields)?;
 
         if (metadata.flags & 8) != 0 {
             return Err(io::Error::new(
@@ -84,7 +85,7 @@ impl<R: BufRead> ZipArchive<R> {
 }
 
 pub struct ZipFile<'a, R: BufRead> {
-    reader: io::Take<&'a mut R>,
+    reader: io::Take<&'a mut Counter<R>>,
     data_left: &'a mut u64,
     metadata: Metadata,
 }

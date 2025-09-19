@@ -196,7 +196,7 @@ impl RawArchive {
 pub struct Metadata {
     pub crc32: u32,
     flags: u16,
-    header_offset: Option<u64>,
+    header_offset: u64,
     pub compressed_size: u64,
     pub uncompressed_size: u64,
     pub compression_method: CompressionMethod,
@@ -218,6 +218,7 @@ pub struct Metadata {
 impl Metadata {
     pub(crate) fn from_local_header(
         header: types::LocalFileHeader,
+        header_offset: u64,
         file_name: Box<[u8]>,
         extra_fields: Box<[u8]>,
     ) -> io::Result<Self> {
@@ -237,7 +238,7 @@ impl Metadata {
         let mut meta = Self {
             crc32: header.crc32.get(),
             flags,
-            header_offset: None,
+            header_offset,
             compressed_size: header.compressed_size.get() as u64,
             uncompressed_size: header.uncompressed_size.get() as u64,
             compression_method: CompressionMethod(header.compression_method.get()),
@@ -291,7 +292,7 @@ impl Metadata {
         let mut meta = Self {
             crc32: header.crc32.get(),
             flags,
-            header_offset: Some(header.local_header_offset.get() as u64),
+            header_offset: header.local_header_offset.get() as u64,
             compressed_size: header.compressed_size.get() as u64,
             uncompressed_size: header.uncompressed_size.get() as u64,
             compression_method: CompressionMethod(header.compression_method.get()),
@@ -325,8 +326,8 @@ impl Metadata {
                     if self.compressed_size == 0xffff_ffff {
                         self.compressed_size = info.next()?;
                     }
-                    if self.header_offset == Some(0xffff_ffff) {
-                        self.header_offset = Some(info.next()?);
+                    if self.header_offset == 0xffff_ffff {
+                        self.header_offset = info.next()?;
                     }
                     // Disk number must be 0
                     info.end()?;
@@ -413,7 +414,7 @@ impl Metadata {
     }
 
     pub fn read_raw<R: Read + Seek>(&self, mut reader: R) -> io::Result<io::Take<R>> {
-        reader.seek(io::SeekFrom::Start(self.header_offset.unwrap()))?;
+        reader.seek(io::SeekFrom::Start(self.header_offset))?;
         let header = reader.read_pod::<types::LocalFileHeader>()?;
 
         if { header.signature } != types::LocalFileHeader::SIGNATURE {
