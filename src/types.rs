@@ -179,16 +179,16 @@ unsafe impl Pod for CentralFileHeader {}
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed(2))]
 pub struct EndOfCentralDirectory64 {
-    signature: U32,
-    zip64_end_of_central_directory_record_size: U64,
-    made_by: U16,
-    version_needed: U16,
-    disk_number: U32,
-    disk_with_central_directory: U32,
-    entries_on_this_disk: U64,
-    total_entries: U64,
-    central_directory_size: U64,
-    central_directory_offset: U64,
+    pub signature: U32,
+    pub record_size: U64,
+    pub made_by: U16,
+    pub version_needed: U16,
+    pub disk_number: U32,
+    pub disk_with_central_directory: U32,
+    pub entries_on_this_disk: U64,
+    pub total_entries: U64,
+    pub central_directory_size: U64,
+    pub central_directory_offset: U64,
 }
 
 impl EndOfCentralDirectory64 {
@@ -200,10 +200,10 @@ unsafe impl Pod for EndOfCentralDirectory64 {}
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed(4))]
 pub struct EndOfCentralDirectory64Locator {
-    signature: U32,
-    disk_with_central_directory: U32,
-    central_directory_64_offset: U64,
-    total_disks: U32,
+    pub signature: U32,
+    pub disk_with_central_directory: U32,
+    pub central_directory_64_offset: U64,
+    pub total_disks: U32,
 }
 
 impl EndOfCentralDirectory64Locator {

@@ -30,9 +30,39 @@ trait ReadExt: Read {
     }
 }
 
-impl<R: Read> ReadExt for R {}
+impl<R: Read + ?Sized> ReadExt for R {}
 
-fn parse_central_directory_header<R: Read>(reader: &mut R) -> io::Result<Metadata> {
+#[inline]
+fn not_a_zip() -> io::Error {
+    invalid("not a zip archive")
+}
+
+#[inline]
+fn invalid_entry() -> io::Error {
+    invalid("invalid entry")
+}
+
+fn invalid_zip() -> io::Error {
+    invalid("invalid zip archive")
+}
+
+#[cold]
+fn invalid(msg: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, msg)
+}
+
+#[cold]
+fn multi_disk() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::Unsupported,
+        "multi-disk archives are not supported",
+    )
+}
+
+trait ReadSeek: Read + Seek {}
+impl<R: Read + Seek> ReadSeek for R {}
+
+fn parse_central_directory_header(reader: &mut dyn ReadSeek) -> io::Result<Metadata> {
     let header = reader.read_pod::<types::CentralFileHeader>()?;
 
     let file_name = reader.read_variable(header.file_name_length.get() as _)?;
@@ -42,82 +72,125 @@ fn parse_central_directory_header<R: Read>(reader: &mut R) -> io::Result<Metadat
     Metadata::from_central_header(header, file_name, extra_fields, comment)
 }
 
-fn find_central_directory_end_in_buffer(
-    buffer: &[u8],
-) -> io::Result<Option<(types::EndOfCentralDirectory, Box<[u8]>)>> {
-    let signature = types::EndOfCentralDirectory::SIGNATURE.as_bytes();
+struct CentralDirectoryEnd {
+    offset: u64,
+    entries: u64,
+    comment: Box<[u8]>,
+}
 
-    for i in memchr::memmem::rfind_iter(buffer, signature) {
-        let record: types::EndOfCentralDirectory = (&buffer[i..]).read_pod()?;
+impl CentralDirectoryEnd {
+    fn find_in_buffer(
+        buffer_offset: u64,
+        buffer: &[u8],
+    ) -> io::Result<Option<(u64, types::EndOfCentralDirectory, Box<[u8]>)>> {
+        let signature = types::EndOfCentralDirectory::SIGNATURE.as_bytes();
 
-        let expected_len = (buffer.len() - (i + 22)) as u16;
+        for i in memchr::memmem::rfind_iter(buffer, signature) {
+            let mut buffer = &buffer[i..];
+            let record: types::EndOfCentralDirectory = buffer.read_pod()?;
 
-        if record.comment_length.get() != expected_len {
-            continue;
+            if record.comment_length.get() as usize != buffer.len() {
+                continue;
+            }
+
+            let offset = buffer_offset + i as u64;
+            return Ok(Some((offset, record, Box::from(buffer))));
         }
 
-        if record.disk_number.get() != 0 || record.disk_with_central_directory.get() != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "multi-file zip are not supported",
-            ));
+        Ok(None)
+    }
+
+    fn find(
+        reader: &mut dyn ReadSeek,
+    ) -> io::Result<(u64, types::EndOfCentralDirectory, Box<[u8]>)> {
+        let size = reader.seek(io::SeekFrom::End(0))?;
+
+        if size < 22 {
+            return Err(not_a_zip());
         }
 
-        if record.total_entries != record.entries_on_this_disk {
+        // Most zip files don't have a comment
+        let pos = reader.seek(io::SeekFrom::End(-22))?;
+
+        let record = reader.read_pod::<types::EndOfCentralDirectory>()?;
+
+        if let Some(eocd) = Self::find_in_buffer(pos, record.as_bytes())? {
+            return Ok(eocd);
+        }
+
+        // This one does
+        let read_size = std::cmp::min(size, 22 + u16::MAX as u64);
+        let pos = reader.seek(io::SeekFrom::Start(size - read_size))?;
+
+        let mut buffer = vec![0; read_size as usize];
+        reader.read_exact(&mut buffer)?;
+
+        if let Some(eocd) = Self::find_in_buffer(pos, &buffer)? {
+            return Ok(eocd);
+        }
+
+        Err(not_a_zip())
+    }
+
+    fn read64(reader: &mut dyn ReadSeek, offset: u64, comment: Box<[u8]>) -> io::Result<Self> {
+        reader.seek(io::SeekFrom::Start(
+            offset - size_of::<types::EndOfCentralDirectory64Locator>() as u64,
+        ))?;
+        let locator: types::EndOfCentralDirectory64Locator = reader.read_pod()?;
+
+        if locator.signature != types::EndOfCentralDirectory64Locator::SIGNATURE {
             return Err(invalid_zip());
         }
 
-        return Ok(Some((record, Box::from(&buffer[i + 22..]))));
+        if locator.disk_with_central_directory.get() != 0 || locator.total_disks.get() > 1 {
+            return Err(multi_disk());
+        }
+
+        reader.seek(io::SeekFrom::Start(
+            locator.central_directory_64_offset.get(),
+        ))?;
+        let end_dir: types::EndOfCentralDirectory64 = reader.read_pod()?;
+
+        // Yes, this is the third time that we do that stupid check
+        if end_dir.disk_with_central_directory.get() != 0 || end_dir.disk_number.get() != 0 {
+            return Err(multi_disk());
+        }
+
+        if { end_dir.total_entries } != { end_dir.entries_on_this_disk } {
+            return Err(invalid_zip());
+        }
+
+        Ok(Self {
+            offset: end_dir.central_directory_offset.get(),
+            entries: end_dir.total_entries.get(),
+            comment,
+        })
     }
 
-    Ok(None)
-}
+    fn read(reader: &mut dyn ReadSeek) -> io::Result<Self> {
+        let (offset, dir_end, comment) = Self::find(reader)?;
 
-#[cold]
-fn not_a_zip() -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, "not a zip archive")
-}
+        if dir_end.disk_number.get() != 0 || dir_end.disk_with_central_directory.get() != 0 {
+            return Err(multi_disk());
+        }
 
-#[cold]
-fn invalid_entry() -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, "invalid entry")
-}
+        if dir_end.total_entries != dir_end.entries_on_this_disk {
+            return Err(invalid_zip());
+        }
 
-#[cold]
-fn invalid_zip() -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, "invalid zip archive")
-}
+        if dir_end.total_entries.get() == u16::MAX
+            || dir_end.central_directory_offset.get() == u32::MAX
+        {
+            // This is a Zip64
+            return Self::read64(reader, offset, comment);
+        }
 
-fn find_central_directory_end<R: Read + Seek>(
-    reader: &mut R,
-) -> io::Result<(types::EndOfCentralDirectory, Box<[u8]>)> {
-    let size = reader.seek(io::SeekFrom::End(0))?;
-
-    if size < 22 {
-        return Err(not_a_zip());
+        Ok(CentralDirectoryEnd {
+            offset: dir_end.central_directory_offset.get() as _,
+            entries: dir_end.total_entries.get() as _,
+            comment,
+        })
     }
-
-    // Most zip files don't have a comment
-    reader.seek(io::SeekFrom::End(-22))?;
-
-    let record = reader.read_pod::<types::EndOfCentralDirectory>()?;
-
-    if let Some(eocd) = find_central_directory_end_in_buffer(record.as_bytes())? {
-        return Ok(eocd);
-    }
-
-    // This one does
-    let read_size = std::cmp::min(size, 22 + u16::MAX as u64);
-    reader.seek(io::SeekFrom::Start(size - read_size))?;
-
-    let mut buffer = vec![0; read_size as usize];
-    reader.read_exact(&mut buffer)?;
-
-    if let Some(eocd) = find_central_directory_end_in_buffer(&buffer)? {
-        return Ok(eocd);
-    }
-
-    Err(not_a_zip())
 }
 
 pub struct RawArchive {
@@ -126,21 +199,26 @@ pub struct RawArchive {
 }
 
 impl RawArchive {
-    pub fn open<R: Read + Seek>(mut reader: R) -> io::Result<Self> {
-        let (end_of_central_directory, comment) = find_central_directory_end(&mut reader)?;
+    pub fn new<R: Read + Seek>(reader: &mut R) -> io::Result<Self> {
+        Self::_new(reader)
+    }
 
-        let central_directory_offset =
-            end_of_central_directory.central_directory_offset.get() as u64;
-        reader.seek(io::SeekFrom::Start(central_directory_offset))?;
+    fn _new(reader: &mut dyn ReadSeek) -> io::Result<Self> {
+        let central_dir = CentralDirectoryEnd::read(reader)?;
 
-        let len = end_of_central_directory.total_entries.get() as usize;
+        reader.seek(io::SeekFrom::Start(central_dir.offset))?;
+
+        let len = central_dir.entries as usize;
         let mut entries = Vec::with_capacity(len);
 
         for _ in 0..len {
-            entries.push(parse_central_directory_header(&mut reader)?);
+            entries.push(parse_central_directory_header(reader)?);
         }
 
-        Ok(Self { entries, comment })
+        Ok(Self {
+            entries,
+            comment: central_dir.comment,
+        })
     }
 
     pub fn entries(&self) -> &[Metadata] {
@@ -449,7 +527,7 @@ impl Metadata {
         Ok(reader.take(self.compressed_size))
     }
 
-    pub fn read_from_raw<R: BufRead>(&self, reader: R) -> io::Result<impl Read + use<R>> {
+    fn read_from_raw<R: BufRead>(&self, reader: R) -> io::Result<impl Read + use<R>> {
         Ok(ZipFileReader {
             reader: Crc32Checker::new(
                 Decompressor::new(reader, self.compression_method)?,
@@ -464,10 +542,7 @@ impl Metadata {
     }
 
     pub fn extract<R: BufRead + Seek>(&self, reader: R, at: &std::path::Path) -> io::Result<()> {
-        let path = at.join(self.safe_name().ok_or_else(
-            #[cold]
-            || io::Error::new(io::ErrorKind::InvalidData, "invalid path in archive"),
-        )?);
+        let path = at.join(self.safe_name().ok_or_else(|| invalid("invalid path"))?);
 
         if self.is_dir() {
             std::fs::create_dir_all(path)?;
@@ -506,9 +581,20 @@ pub struct ZipArchive<R> {
     reader: R,
 }
 
+impl ZipArchive<io::BufReader<std::fs::File>> {
+    #[inline]
+    pub fn open(path: impl AsRef<std::path::Path>) -> io::Result<Self> {
+        Self::_open(path.as_ref())
+    }
+
+    fn _open(path: &std::path::Path) -> io::Result<Self> {
+        Self::new(io::BufReader::new(std::fs::File::open(path)?))
+    }
+}
+
 impl<R: BufRead + Seek> ZipArchive<R> {
     pub fn new(mut reader: R) -> io::Result<Self> {
-        let inner = RawArchive::open(&mut reader)?;
+        let inner = RawArchive::new(&mut reader)?;
 
         let names = inner
             .entries()
