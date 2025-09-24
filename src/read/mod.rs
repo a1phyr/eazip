@@ -461,17 +461,16 @@ impl Metadata {
     }
 
     pub fn safe_name(&self) -> Option<&str> {
-        if std::path::Path::new(&*self.name).has_root() || self.name.contains(['\\']) {
+        if self.name.starts_with('/')
+            || self.name.contains('\\')
+            || self.name.contains('\0')
+            || (cfg!(windows) && self.name.contains(':'))
+        {
             return None;
         }
 
-        let mut depth = 0u32;
-        for part in self.name.split('/') {
-            match part {
-                "." => (),
-                ".." => depth = depth.checked_sub(1)?,
-                _ => depth += 1,
-            }
+        if self.name.split('/').any(|part| part.contains("..")) {
+            return None;
         }
 
         Some(&self.name)
