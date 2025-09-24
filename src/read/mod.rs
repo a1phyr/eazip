@@ -270,6 +270,33 @@ impl RawArchive {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FileType {
+    File,
+    Directory,
+    Symlink,
+}
+
+impl FileType {
+    fn test(attr: Option<u32>, name: &str) -> Option<Self> {
+        let has_attr = |flag| match attr {
+            Some(attr) => attr & flag == flag,
+            None => false,
+        };
+
+        let is_file = has_attr(10 << 28);
+        let is_dir = has_attr(1 << 4) || has_attr(4 << 28) || name.ends_with('/');
+        let is_symlink = has_attr(10 << 28);
+
+        match (is_file, is_dir, is_symlink) {
+            (_, false, false) => Some(FileType::File),
+            (false, true, false) => Some(FileType::Directory),
+            (false, false, true) => Some(FileType::Symlink),
+            _ => None,
+        }
+    }
+}
+
 pub struct Metadata {
     flags: u16,
     header_offset: u64,
@@ -280,6 +307,7 @@ pub struct Metadata {
     pub compression_method: CompressionMethod,
     pub crc32: u32,
     external_attributes: Option<u32>,
+    file_type: FileType,
 
     pub modification_time: Option<Timestamp>,
     pub access_time: Option<Timestamp>,
@@ -314,6 +342,8 @@ impl Metadata {
             cp437::convert(&file_name)
         };
 
+        let file_type = FileType::test(None, &name).ok_or_else(invalid_entry)?;
+
         let mut meta = Self {
             crc32: header.crc32.get(),
             flags,
@@ -324,6 +354,7 @@ impl Metadata {
             uncompressed_size: header.uncompressed_size.get() as u64,
             compression_method: CompressionMethod(header.compression_method.get()),
             external_attributes: None,
+            file_type,
 
             modification_time: None,
             access_time: None,
@@ -367,6 +398,9 @@ impl Metadata {
             (cp437::convert(&raw_name), cp437::convert(&raw_comment))
         };
 
+        let external_attributes = Some(header.external_attributes.get());
+        let file_type = FileType::test(external_attributes, &name).ok_or_else(invalid_entry)?;
+
         let mut meta = Self {
             crc32: header.crc32.get(),
             flags,
@@ -376,7 +410,8 @@ impl Metadata {
             compressed_size: header.compressed_size.get() as u64,
             uncompressed_size: header.uncompressed_size.get() as u64,
             compression_method: CompressionMethod(header.compression_method.get()),
-            external_attributes: Some(header.external_attributes.get()),
+            external_attributes,
+            file_type,
 
             modification_time: None,
             access_time: None,
@@ -452,8 +487,14 @@ impl Metadata {
         self.flags & (1 << 0) != 0
     }
 
+    #[inline]
     pub fn is_dir(&self) -> bool {
-        self.name.ends_with('/')
+        matches!(self.file_type, FileType::Directory)
+    }
+
+    #[inline]
+    pub fn is_symlink(&self) -> bool {
+        matches!(self.file_type, FileType::Symlink)
     }
 
     pub fn display_name(&self) -> &str {
@@ -463,7 +504,6 @@ impl Metadata {
     pub fn safe_name(&self) -> Option<&str> {
         if self.name.starts_with('/')
             || self.name.contains('\\')
-            || self.name.contains('\0')
             || (cfg!(windows) && self.name.contains(':'))
         {
             return None;
@@ -548,13 +588,37 @@ impl Metadata {
     pub fn extract<R: BufRead + Seek>(&self, reader: R, at: &std::path::Path) -> io::Result<()> {
         let path = at.join(self.safe_name().ok_or_else(|| invalid("invalid path"))?);
 
-        if self.is_dir() {
-            std::fs::create_dir_all(path)?;
-        } else {
-            std::fs::create_dir_all(path.parent().unwrap())?;
-            let mut f = std::fs::File::create_new(&path)?;
-            io::copy(&mut self.read(reader)?, &mut f)?;
-        };
+        match self.file_type {
+            FileType::File => {
+                std::fs::create_dir_all(path.parent().unwrap())?;
+                let mut f = std::fs::File::create_new(&path)?;
+                io::copy(&mut self.read(reader)?, &mut f)?;
+            }
+            FileType::Directory => {
+                std::fs::create_dir_all(path)?;
+            }
+            FileType::Symlink => {
+                let target = io::read_to_string(self.read(reader)?)?;
+                if target.starts_with('/') || target.contains('\\') || target.contains("..") {
+                    return Err(invalid("invalid symlink"));
+                }
+
+                std::fs::create_dir_all(path.parent().unwrap())?;
+
+                #[cfg(unix)]
+                std::os::unix::fs::symlink(target, path)?;
+
+                #[cfg(windows)]
+                if target.ends_with('/') {
+                    std::os::windows::fs::symlink_dir(target, path)?;
+                } else {
+                    std::os::windows::fs::symlink_file(target, path)?;
+                }
+
+                #[cfg(not(any(unix, windows)))]
+                std::fs::write(path, target.as_bytes())?;
+            }
+        }
 
         Ok(())
     }
@@ -568,6 +632,7 @@ impl fmt::Debug for Metadata {
             .field("compressed_size", &self.compressed_size)
             .field("uncompressed_size", &self.uncompressed_size)
             .field("compression_method", &self.compression_method)
+            .field("file_type", &self.file_type)
             .field("external_attributes", &self.external_attributes)
             .field("modification_time", &self.modification_time)
             .field("access_time", &self.access_time)
