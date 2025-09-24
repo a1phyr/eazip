@@ -494,7 +494,7 @@ impl Metadata {
     }
 
     #[cold]
-    pub fn set_data_offset<R: Read + Seek>(&self, reader: &mut R) -> io::Result<()> {
+    fn set_data_offset(&self, reader: &mut dyn ReadSeek) -> io::Result<()> {
         reader.seek(io::SeekFrom::Start(self.header_offset))?;
         let header = reader.read_pod::<types::LocalFileHeader>()?;
 
@@ -527,18 +527,23 @@ impl Metadata {
         Ok(reader.take(self.compressed_size))
     }
 
-    fn read_from_raw<R: BufRead>(&self, reader: R) -> io::Result<impl Read + use<R>> {
-        Ok(ZipFileReader {
-            reader: Crc32Checker::new(
-                Decompressor::new(reader, self.compression_method)?,
-                self.crc32,
-            ),
-            uncompressed_size: self.uncompressed_size,
-        })
+    pub fn read<R: BufRead + Seek>(&self, reader: R) -> io::Result<impl Read + use<R>> {
+        let reader = Decompressor::new(self.read_raw(reader)?, self.compression_method)?;
+        Ok(self.read_with_decompressor(reader))
     }
 
-    pub fn read<R: BufRead + Seek>(&self, reader: R) -> io::Result<impl Read + use<R>> {
-        self.read_from_raw(self.read_raw(reader)?)
+    fn read_from_raw<R: BufRead>(&self, reader: R) -> io::Result<impl Read + use<R>> {
+        Ok(self.read_with_decompressor(Decompressor::new(reader, self.compression_method)?))
+    }
+
+    pub fn read_with_decompressor<R: Read>(&self, reader: R) -> impl Read + use<R> {
+        Crc32Checker::new(
+            LengthChecker {
+                reader,
+                expected: self.uncompressed_size,
+            },
+            self.crc32,
+        )
     }
 
     pub fn extract<R: BufRead + Seek>(&self, reader: R, at: &std::path::Path) -> io::Result<()> {
@@ -663,33 +668,59 @@ impl<R: BufRead + Seek> ZipFile<'_, R> {
     }
 }
 
-struct ZipFileReader<R> {
-    reader: Crc32Checker<Decompressor<R>>,
-    uncompressed_size: u64,
+#[cold]
+fn too_large() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, "file is larger than expected")
 }
 
-impl<R: BufRead> Read for ZipFileReader<R> {
+pub struct LengthChecker<R> {
+    expected: u64,
+    reader: R,
+}
+
+impl<R: Read> Read for LengthChecker<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let n = self.reader.read(buf)?;
-        self.uncompressed_size = self.uncompressed_size.saturating_sub(n as u64);
+        self.expected = self.expected.checked_sub(n as u64).ok_or_else(too_large)?;
         Ok(n)
     }
 
     fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
         let size = self
-            .uncompressed_size
+            .expected
             .try_into()
             .map_err(|_| io::ErrorKind::OutOfMemory)?;
         buf.try_reserve(size)?;
-        self.reader.read_to_end(buf)
+
+        let initial_len = buf.len();
+        buf.extend((0..size).map(|_| 0));
+        self.read_exact(&mut buf[initial_len..])?;
+
+        // Check that we really are at EOF
+        self.read(&mut [0])?;
+
+        Ok(size)
     }
 
     fn read_to_string(&mut self, buf: &mut String) -> io::Result<usize> {
         let size = self
-            .uncompressed_size
+            .expected
             .try_into()
             .map_err(|_| io::ErrorKind::OutOfMemory)?;
         buf.try_reserve(size)?;
-        self.reader.read_to_string(buf)
+
+        // Forward to the default implementation of `read_to_string`
+
+        struct Reader<R>(R);
+        impl<R: Read> Read for Reader<R> {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                self.0.read(buf)
+            }
+            fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
+                self.0.read_to_end(buf)
+            }
+        }
+
+        Reader(self).read_to_string(buf)
     }
 }
