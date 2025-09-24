@@ -231,7 +231,7 @@ impl RawArchive {
 
     pub fn extract<R: BufRead + Seek>(
         &self,
-        mut reader: R,
+        reader: &mut R,
         at: &std::path::Path,
     ) -> io::Result<()> {
         match std::fs::create_dir(at) {
@@ -241,7 +241,7 @@ impl RawArchive {
         };
 
         for entry in &self.entries {
-            entry.extract(&mut reader, at)?;
+            entry.extract(&mut *reader, at)?;
         }
 
         Ok(())
@@ -250,7 +250,7 @@ impl RawArchive {
     #[cfg(feature = "parallel")]
     pub fn parallel_extract<R: sync_file::ReadAt + sync_file::Size + Sync>(
         &self,
-        reader: R,
+        reader: &R,
         at: &std::path::Path,
     ) -> io::Result<()> {
         use rayon::prelude::*;
@@ -261,10 +261,10 @@ impl RawArchive {
             Err(err) => return Err(err),
         };
 
-        self.entries.par_iter().try_for_each(|entry| {
-            let reader = io::BufReader::new(sync_file::Adapter::new(&reader));
-            entry.extract(reader, at)
-        })?;
+        self.entries.par_iter().try_for_each_init(
+            || io::BufReader::new(sync_file::Adapter::new(reader)),
+            |reader, entry| entry.extract(reader, at),
+        )?;
 
         Ok(())
     }
