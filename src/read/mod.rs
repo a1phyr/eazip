@@ -59,6 +59,26 @@ fn multi_disk() -> io::Error {
     )
 }
 
+fn validate_symlink(name: &str, target: &str) -> bool {
+    if target.starts_with('/') || target.contains('\\') || (cfg!(windows) && target.contains(':')) {
+        return false;
+    }
+
+    let mut depth = name.split('/').filter(|p| *p != ".").count() - 1;
+    for part in target.split('/') {
+        match part {
+            "." => (),
+            ".." => match depth.checked_sub(1) {
+                Some(d) => depth = d,
+                None => return false,
+            },
+            _ => depth += 1,
+        }
+    }
+
+    true
+}
+
 trait ReadSeek: Read + Seek {}
 impl<R: Read + Seek> ReadSeek for R {}
 
@@ -586,24 +606,23 @@ impl Metadata {
     }
 
     pub fn extract<R: BufRead + Seek>(&self, reader: R, at: &std::path::Path) -> io::Result<()> {
-        let path = at.join(self.safe_name().ok_or_else(|| invalid("invalid path"))?);
+        let name = self.safe_name().ok_or_else(|| invalid("invalid path"))?;
+        let path = at.join(name);
+        std::fs::create_dir_all(path.parent().unwrap())?;
 
         match self.file_type {
             FileType::File => {
-                std::fs::create_dir_all(path.parent().unwrap())?;
                 let mut f = std::fs::File::create_new(&path)?;
                 io::copy(&mut self.read(reader)?, &mut f)?;
             }
             FileType::Directory => {
-                std::fs::create_dir_all(path)?;
+                std::fs::create_dir(path)?;
             }
             FileType::Symlink => {
                 let target = io::read_to_string(self.read(reader)?)?;
-                if target.starts_with('/') || target.contains('\\') || target.contains("..") {
-                    return Err(invalid("invalid symlink"));
+                if !validate_symlink(name, &target) {
+                    return Err(invalid("invalid symlink target"));
                 }
-
-                std::fs::create_dir_all(path.parent().unwrap())?;
 
                 #[cfg(unix)]
                 std::os::unix::fs::symlink(target, path)?;
@@ -787,4 +806,14 @@ impl<R: Read> Read for LengthChecker<R> {
 
         Reader(self).read_to_string(buf)
     }
+}
+
+#[test]
+fn symlink_validation() {
+    assert!(validate_symlink("a/b", "../c"));
+    assert!(!validate_symlink("a/b", "../../c"));
+    assert!(!validate_symlink("a/./././b", "../../c"));
+    assert!(!validate_symlink("a/b", "/c"));
+    #[cfg(windows)]
+    assert!(!validate_symlink("a/b", "C:/e"));
 }
