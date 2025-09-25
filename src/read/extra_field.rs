@@ -2,6 +2,8 @@
 //!
 //! Reference: <https://libzip.org/specifications/extrafld.txt>
 
+#![allow(unused)]
+
 use std::fmt;
 
 use crate::utils::Timestamp;

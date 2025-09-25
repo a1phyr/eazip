@@ -11,7 +11,7 @@ use crate::{
     utils::{Crc32Checker, Timestamp, cp437},
 };
 
-pub mod extra_field;
+mod extra_field;
 pub mod stream;
 
 use extra_field::{ExtraField, ExtraFields};
@@ -338,8 +338,6 @@ pub struct Metadata {
 
     raw_comment: Option<Box<[u8]>>,
     comment: Option<Box<str>>,
-
-    extra_fields: ExtraFields,
 }
 
 impl Metadata {
@@ -385,11 +383,10 @@ impl Metadata {
 
             comment: None,
             raw_comment: None,
-
-            extra_fields: ExtraFields(extra_fields),
         };
 
-        meta.parse_extra_fields().ok_or_else(invalid_entry)?;
+        meta.parse_extra_fields(ExtraFields(extra_fields))
+            .ok_or_else(invalid_entry)?;
 
         Ok(meta)
     }
@@ -442,17 +439,16 @@ impl Metadata {
 
             comment: Some(comment.into()),
             raw_comment: Some(raw_comment),
-
-            extra_fields: ExtraFields(extra_fields),
         };
 
-        meta.parse_extra_fields().ok_or_else(invalid_entry)?;
+        meta.parse_extra_fields(ExtraFields(extra_fields))
+            .ok_or_else(invalid_entry)?;
 
         Ok(meta)
     }
 
-    fn parse_extra_fields(&mut self) -> Option<()> {
-        for field in self.extra_fields.iter() {
+    fn parse_extra_fields(&mut self, extra_fields: ExtraFields) -> Option<()> {
+        for field in extra_fields.iter() {
             match field {
                 ExtraField::Zip64ExtendedInformation(mut info) => {
                     if self.uncompressed_size == 0xffff_ffff {
@@ -546,10 +542,6 @@ impl Metadata {
 
     pub fn raw_comment(&self) -> Option<&[u8]> {
         self.raw_comment.as_deref()
-    }
-
-    pub fn extra_fields(&self) -> extra_field::ExtraFieldIterator<'_> {
-        self.extra_fields.iter()
     }
 
     #[cold]
@@ -658,7 +650,6 @@ impl fmt::Debug for Metadata {
             .field("creation_time", &self.creation_time)
             .field("name", &self.name)
             .field("comment", &self.comment)
-            .field("extra_fields", &self.extra_fields)
             .finish()
     }
 }
