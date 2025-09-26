@@ -59,7 +59,7 @@ struct Metadata {
 enum State {
     #[default]
     Default,
-    Writing,
+    Writing(u64),
 }
 
 #[derive(Default)]
@@ -80,8 +80,19 @@ impl RawArchiveWriter {
 
         match self.state {
             State::Default => Ok(()),
-            State::Writing => Err(error()),
+            State::Writing(_) => Err(error()),
         }
+    }
+
+    fn recover<W: io::Seek>(&mut self, mut writer: W) -> io::Result<()> {
+        let State::Writing(pos) = self.state else {
+            return Ok(());
+        };
+
+        writer.seek(io::SeekFrom::Start(pos))?;
+        self.state = State::Default;
+
+        Ok(())
     }
 
     fn write_file_raw<W: Write>(
@@ -92,13 +103,13 @@ impl RawArchiveWriter {
         meta: &Metadata,
     ) -> io::Result<()> {
         self.check_state()?;
-        self.state = State::Writing;
+        self.state = State::Writing(self.position);
 
         let mut counter = Counter::new(writer);
 
         self.write_local_header(&mut counter, name, meta)?;
         counter.write_all(content)?;
-        self.push_central_header(name, meta, self.position);
+        self.push_central_header(name, meta, self.position)?;
 
         self.position += counter.amt;
         self.state = State::Default;
@@ -116,7 +127,7 @@ impl RawArchiveWriter {
         let mut writer = Counter::new(writer);
 
         self.check_state()?;
-        self.state = State::Writing;
+        self.state = State::Writing(self.position);
 
         self.write_local_header(
             &mut writer,
@@ -185,7 +196,16 @@ impl RawArchiveWriter {
         Ok(())
     }
 
-    fn push_central_header(&mut self, name: &str, meta: &Metadata, local_header_offset: u64) {
+    fn push_central_header(
+        &mut self,
+        name: &str,
+        meta: &Metadata,
+        local_header_offset: u64,
+    ) -> io::Result<()> {
+        self.central_headers.try_reserve(
+            size_of::<types::CentralFileHeader>() + size_of::<CentralZip64>() + name.len(),
+        )?;
+
         self.n_entries += 1;
 
         debug_assert!(name.len() < u16::MAX as usize);
@@ -225,6 +245,8 @@ impl RawArchiveWriter {
 
         self.central_headers.extend_from_slice(name.as_bytes());
         self.central_headers.extend_from_slice(zip64.as_bytes());
+
+        Ok(())
     }
 
     fn finish<W: Write>(self, writer: &mut W) -> io::Result<()> {
@@ -296,7 +318,7 @@ impl<W: Write> RawFileStreamer<'_, W> {
                 attributes: 0,
             },
             self.local_header_offset,
-        );
+        )?;
 
         self.raw.state = State::Default;
 
@@ -405,6 +427,13 @@ impl<W: Write> ArchiveWriter<W> {
                 attributes: (1 << 4) | (4 << 28),
             },
         )
+    }
+
+    pub fn recover(&mut self) -> io::Result<()>
+    where
+        W: io::Seek,
+    {
+        self.raw.recover(&mut self.writer)
     }
 
     pub fn flush(&mut self) -> io::Result<()> {
