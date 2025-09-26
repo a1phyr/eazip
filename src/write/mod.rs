@@ -47,10 +47,8 @@ impl<W: io::Write> ArchiveWriter<W> {
             &mut self.writer,
             name,
             &compressed,
-            &raw::Metadata {
-                is_streaming: false,
+            raw::Metadata {
                 compression_method: options.compression_method,
-                compressed_size: compressed.len() as u64,
                 uncompressed_size,
                 crc32,
                 attributes: 0,
@@ -65,9 +63,7 @@ impl<W: io::Write> ArchiveWriter<W> {
         name: &str,
         options: &FileOptions,
     ) -> io::Result<FileStreamer<'_, W>> {
-        let writer =
-            self.raw
-                .start_stream_raw(&mut self.writer, name, options.compression_method)?;
+        let writer = self.raw.start_stream_raw(&mut self.writer, name, options)?;
 
         Ok(FileStreamer {
             writer: Counter::new(Crc32Writer::new(Compressor::new(
@@ -90,10 +86,8 @@ impl<W: io::Write> ArchiveWriter<W> {
             &mut self.writer,
             name,
             &[],
-            &raw::Metadata {
-                is_streaming: false,
+            raw::Metadata {
                 compression_method: CompressionMethod::STORE,
-                compressed_size: 0,
                 uncompressed_size: 0,
                 crc32: 0,
                 attributes: (1 << 4) | (4 << 28),
@@ -106,10 +100,8 @@ impl<W: io::Write> ArchiveWriter<W> {
             &mut self.writer,
             name,
             target.as_bytes(),
-            &raw::Metadata {
-                is_streaming: false,
+            raw::Metadata {
                 compression_method: CompressionMethod::STORE,
-                compressed_size: target.len() as _,
                 uncompressed_size: target.len() as _,
                 crc32: crc32fast::hash(target.as_bytes()),
                 attributes: (1 << 4) | (4 << 28),
