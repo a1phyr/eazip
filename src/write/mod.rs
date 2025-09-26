@@ -92,7 +92,6 @@ impl RawArchiveWriter {
         meta: &Metadata,
     ) -> io::Result<()> {
         self.check_state()?;
-
         self.state = State::Writing;
 
         let mut counter = Counter::new(writer);
@@ -105,6 +104,43 @@ impl RawArchiveWriter {
         self.state = State::Default;
 
         Ok(())
+    }
+
+    fn start_stream_raw<W: Write>(
+        &mut self,
+        writer: W,
+        name: &str,
+        compression_method: CompressionMethod,
+    ) -> io::Result<RawFileStreamer<'_, W>> {
+        let local_header_offset = self.position;
+        let mut writer = Counter::new(writer);
+
+        self.check_state()?;
+        self.state = State::Writing;
+
+        self.write_local_header(
+            &mut writer,
+            name,
+            &Metadata {
+                is_streaming: true,
+                compression_method,
+                compressed_size: 0,
+                uncompressed_size: 0,
+                crc32: 0,
+                attributes: 0,
+            },
+        )?;
+
+        Ok(RawFileStreamer {
+            started_at: writer.amt,
+            writer,
+
+            file_name: name.into(),
+            local_header_offset,
+            compression_method,
+
+            raw: self,
+        })
     }
 
     fn write_local_header<W: Write>(
@@ -216,6 +252,58 @@ impl RawArchiveWriter {
     }
 }
 
+pub struct RawFileStreamer<'a, W: Write> {
+    started_at: u64,
+    writer: Counter<W>,
+
+    file_name: Box<str>,
+    local_header_offset: u64,
+    compression_method: CompressionMethod,
+
+    raw: &'a mut RawArchiveWriter,
+}
+
+impl<W: Write> Write for RawFileStreamer<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.writer.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.writer.flush()
+    }
+}
+
+impl<W: Write> RawFileStreamer<'_, W> {
+    pub fn finish(mut self, uncompressed_size: u64, crc32: u32) -> io::Result<()> {
+        let compressed_size = self.writer.amt - self.started_at;
+
+        self.writer.write_pod(&types::DataDescriptor64 {
+            signature: types::DataDescriptor64::SIGNATURE,
+            crc32: types::U32::set(crc32),
+            compressed_size: types::U64::set(compressed_size),
+            uncompressed_size: types::U64::set(uncompressed_size),
+        })?;
+        self.raw.position += self.writer.amt;
+
+        self.raw.push_central_header(
+            &self.file_name,
+            &Metadata {
+                is_streaming: true,
+                compression_method: self.compression_method,
+                compressed_size,
+                uncompressed_size,
+                crc32,
+                attributes: 0,
+            },
+            self.local_header_offset,
+        );
+
+        self.raw.state = State::Default;
+
+        Ok(())
+    }
+}
+
 #[derive(Default)]
 pub struct ArchiveWriter<W: Write> {
     writer: W,
@@ -267,39 +355,16 @@ impl<W: Write> ArchiveWriter<W> {
         name: &str,
         options: &FileOptions,
     ) -> io::Result<FileStreamer<'_, W>> {
-        self.raw.check_state()?;
-
-        let local_header_offset = self.raw.position;
-
-        self.raw.state = State::Writing;
-
-        let mut writer = Counter::new(&mut self.writer);
-
-        self.raw.write_local_header(
-            &mut writer,
-            name,
-            &Metadata {
-                is_streaming: true,
-                compression_method: options.compression_method,
-                compressed_size: 0,
-                uncompressed_size: 0,
-                crc32: 0,
-                attributes: 0,
-            },
-        )?;
+        let writer =
+            self.raw
+                .start_stream_raw(&mut self.writer, name, options.compression_method)?;
 
         Ok(FileStreamer {
-            started_at: writer.amt,
             writer: Counter::new(Crc32Writer::new(Compressor::new(
                 writer,
                 options.compression_method,
                 options.level,
             )?)),
-
-            file_name: name.into(),
-            local_header_offset,
-
-            raw: &mut self.raw,
         })
     }
 
@@ -353,13 +418,7 @@ impl<W: Write> ArchiveWriter<W> {
 }
 
 pub struct FileStreamer<'a, W: Write> {
-    started_at: u64,
-    writer: Counter<Crc32Writer<Compressor<Counter<&'a mut W>>>>,
-
-    file_name: Box<str>,
-    local_header_offset: u64,
-
-    raw: &'a mut RawArchiveWriter,
+    writer: Counter<Crc32Writer<Compressor<RawFileStreamer<'a, &'a mut W>>>>,
 }
 
 impl<W: Write> Write for FileStreamer<'_, W> {
@@ -374,38 +433,11 @@ impl<W: Write> Write for FileStreamer<'_, W> {
 
 impl<W: Write> FileStreamer<'_, W> {
     pub fn finish(self) -> io::Result<()> {
+        let uncompressed_size = self.writer.amt;
         let crc32 = self.writer.inner.result();
 
-        let writer = self.writer.inner.into_inner();
-        let compression_method = writer.compression_method();
-        let mut writer = writer.finish()?;
+        let raw_writer = self.writer.inner.into_inner().finish()?;
 
-        let compressed_size = writer.amt - self.started_at;
-        let uncompressed_size = self.writer.amt;
-
-        writer.write_pod(&types::DataDescriptor64 {
-            signature: types::DataDescriptor64::SIGNATURE,
-            crc32: types::U32::set(crc32),
-            compressed_size: types::U64::set(compressed_size),
-            uncompressed_size: types::U64::set(uncompressed_size),
-        })?;
-        self.raw.position += writer.amt;
-
-        self.raw.push_central_header(
-            &self.file_name,
-            &Metadata {
-                is_streaming: true,
-                compression_method,
-                compressed_size,
-                uncompressed_size,
-                crc32,
-                attributes: 0,
-            },
-            self.local_header_offset,
-        );
-
-        self.raw.state = State::Default;
-
-        Ok(())
+        raw_writer.finish(uncompressed_size, crc32)
     }
 }
