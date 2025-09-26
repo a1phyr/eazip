@@ -65,7 +65,7 @@ enum State {
 #[derive(Default)]
 struct RawArchiveWriter {
     state: State,
-    n_entries: u16,
+    n_entries: u64,
     central_headers: Vec<u8>,
     position: u64,
 }
@@ -252,21 +252,41 @@ impl RawArchiveWriter {
     fn finish<W: Write>(self, writer: &mut W) -> io::Result<()> {
         self.check_state()?;
 
-        let central_directory_offset = self.position as u32;
+        let central_directory_offset = self.position;
 
         writer.write_all(&self.central_headers)?;
 
-        let central_directory_size =
-            self.position as u32 + self.central_headers.len() as u32 - central_directory_offset;
+        let central_directory_size = self.central_headers.len() as u64;
+        let central_directory_64_offset = central_directory_offset + central_directory_size;
+
+        writer.write_pod(&types::EndOfCentralDirectory64 {
+            signature: types::EndOfCentralDirectory64::SIGNATURE,
+            record_size: types::U64::set(44),
+            made_by: types::U16::set(0x0300),    // Unix
+            version_needed: types::U16::set(45), // Version 4.5 for Zip64 support
+            disk_number: types::U32::set(0),
+            disk_with_central_directory: types::U32::set(0),
+            entries_on_this_disk: types::U64::set(self.n_entries),
+            total_entries: types::U64::set(self.n_entries),
+            central_directory_size: types::U64::set(central_directory_size),
+            central_directory_offset: types::U64::set(central_directory_offset),
+        })?;
+
+        writer.write_pod(&types::EndOfCentralDirectory64Locator {
+            signature: types::EndOfCentralDirectory64Locator::SIGNATURE,
+            disk_with_central_directory: types::U32::set(0),
+            central_directory_64_offset: types::U64::set(central_directory_64_offset),
+            total_disks: types::U32::set(1),
+        })?;
 
         writer.write_pod(&types::EndOfCentralDirectory {
             signature: types::EndOfCentralDirectory::SIGNATURE,
             disk_number: types::U16::set(0),
             disk_with_central_directory: types::U16::set(0),
-            entries_on_this_disk: types::U16::set(self.n_entries),
-            total_entries: types::U16::set(self.n_entries),
-            central_directory_size: types::U32::set(central_directory_size),
-            central_directory_offset: types::U32::set(central_directory_offset),
+            entries_on_this_disk: types::U16::set(0xffff),
+            total_entries: types::U16::set(0xffff),
+            central_directory_size: types::U32::set(0xffff_ffff),
+            central_directory_offset: types::U32::set(0xffff_ffff),
             comment_length: types::U16::set(0),
         })?;
 
