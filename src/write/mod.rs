@@ -326,6 +326,22 @@ impl<W: Write> ArchiveWriter<W> {
         )
     }
 
+    pub fn write_symlink(&mut self, name: &str, target: &str) -> io::Result<()> {
+        self.raw.write_file_raw(
+            &mut self.writer,
+            name,
+            target.as_bytes(),
+            &Metadata {
+                is_streaming: false,
+                compression_method: CompressionMethod::STORE,
+                compressed_size: target.len() as _,
+                uncompressed_size: target.len() as _,
+                crc32: crc32fast::hash(target.as_bytes()),
+                attributes: (1 << 4) | (4 << 28),
+            },
+        )
+    }
+
     pub fn flush(&mut self) -> io::Result<()> {
         self.writer.flush()
     }
