@@ -156,7 +156,7 @@ impl RawArchiveWriter {
 
     fn write_local_header<W: Write>(
         &mut self,
-        writer: &mut Counter<W>,
+        writer: &mut W,
         name: &str,
         meta: &Metadata,
     ) -> io::Result<()> {
@@ -326,6 +326,36 @@ impl<W: Write> RawFileStreamer<'_, W> {
     }
 }
 
+impl<W: Write + io::Seek> RawFileStreamer<'_, W> {
+    pub fn finish_seekable(self, uncompressed_size: u64, crc32: u32) -> io::Result<()> {
+        let compressed_size = self.writer.amt - self.started_at;
+        self.raw.position += self.writer.amt;
+
+        let mut writer = self.writer.inner;
+
+        let meta = Metadata {
+            is_streaming: false,
+            compression_method: self.compression_method,
+            compressed_size,
+            uncompressed_size,
+            crc32,
+            attributes: 0,
+        };
+
+        writer.seek(std::io::SeekFrom::Start(self.local_header_offset))?;
+        self.raw
+            .write_local_header(&mut writer, &self.file_name, &meta)?;
+        writer.seek(std::io::SeekFrom::Start(self.raw.position))?;
+
+        self.raw
+            .push_central_header(&self.file_name, &meta, self.local_header_offset)?;
+
+        self.raw.state = State::Default;
+
+        Ok(())
+    }
+}
+
 #[derive(Default)]
 pub struct ArchiveWriter<W: Write> {
     writer: W,
@@ -468,5 +498,16 @@ impl<W: Write> FileStreamer<'_, W> {
         let raw_writer = self.writer.inner.into_inner().finish()?;
 
         raw_writer.finish(uncompressed_size, crc32)
+    }
+}
+
+impl<W: Write + io::Seek> FileStreamer<'_, W> {
+    pub fn finish_seekable(self) -> io::Result<()> {
+        let uncompressed_size = self.writer.amt;
+        let crc32 = self.writer.inner.result();
+
+        let raw_writer = self.writer.inner.into_inner().finish()?;
+
+        raw_writer.finish_seekable(uncompressed_size, crc32)
     }
 }
