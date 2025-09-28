@@ -606,6 +606,10 @@ impl Metadata {
             FileType::File => {
                 let mut f = std::fs::File::create_new(&path)?;
                 io::copy(&mut self.read(reader)?, &mut f)?;
+
+                if let Some(mod_time) = self.modification_time {
+                    f.set_times(std::fs::FileTimes::new().set_modified(mod_time.to_std()))?;
+                }
             }
             FileType::Directory => {
                 std::fs::create_dir(path)?;
