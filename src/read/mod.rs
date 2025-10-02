@@ -313,17 +313,19 @@ enum FileType {
 
 impl FileType {
     fn test(attr: u32, name: &str) -> Option<Self> {
-        let has_attr = |flag| attr & flag == flag;
+        let dos_attr = attr as u16;
+        let unix_mode = (attr >> 16) as u16;
+        let unix_kind = unix_mode >> 12;
 
-        let is_file = has_attr(10 << 28);
-        let is_dir = has_attr(1 << 4) || has_attr(4 << 28) || name.ends_with('/');
-        let is_symlink = has_attr(10 << 28);
+        let is_file = (dos_attr & (1 << 5)) != 0 || unix_kind == 8;
+        let is_dir = (dos_attr & (1 << 4)) != 0 || unix_kind == 4 || name.ends_with('/');
+        let is_symlink = unix_kind == 10;
 
         match (is_file, is_dir, is_symlink) {
             (_, false, false) => Some(FileType::File),
             (false, true, false) => Some(FileType::Directory),
             (false, false, true) => Some(FileType::Symlink),
-            x => panic!("fds = {x:?}"),
+            _ => None,
         }
     }
 }
