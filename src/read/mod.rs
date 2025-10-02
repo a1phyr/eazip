@@ -2,7 +2,6 @@ use std::{
     collections::HashMap,
     fmt,
     io::{self, BufRead, Read, Seek},
-    sync::atomic,
 };
 
 use crate::{
@@ -98,20 +97,19 @@ fn parse_central_directory(reader: &mut dyn ReadSeek, len: usize) -> io::Result<
 
     let mut buf = Vec::new();
     for _ in 0..len {
-        let header = reader.read_pod::<types::CentralFileHeader>()?;
+        entries.push(Metadata::read_central(reader, &mut buf)?);
+    }
 
-        let [file_name, extra_fields, comment] = reader.read_variable_fields(
-            [
-                header.file_name_length.get() as _,
-                header.extra_fields_length.get() as _,
-                header.file_comment_length.get() as _,
-            ],
-            &mut buf,
-        )?;
+    // Check that the local headers match the central ones and fill the missing data offset
+    for entry in &mut entries {
+        reader.seek(io::SeekFrom::Start(entry.header_offset))?;
+        let local_entry = Metadata::read_local(reader, entry.header_offset, &mut buf)?;
 
-        let entry = Metadata::from_central_header(header, &file_name, &extra_fields, &comment)
-            .ok_or_else(invalid_entry)?;
-        entries.push(entry);
+        if entry.compression_method != local_entry.compression_method {
+            return Err(invalid_entry());
+        }
+
+        entry.data_offset = local_entry.data_offset;
     }
 
     Ok(entries)
@@ -351,7 +349,7 @@ fn check_string(raw: &[u8], is_unicode: bool) -> Option<(Box<str>, Option<u32>)>
 pub struct Metadata {
     flags: u16,
     header_offset: u64,
-    data_offset: atomic::AtomicU64,
+    data_offset: u64,
 
     pub compressed_size: u64,
     pub uncompressed_size: u64,
@@ -369,7 +367,26 @@ pub struct Metadata {
 }
 
 impl Metadata {
-    pub(crate) fn from_local_header(
+    fn read_local(
+        reader: &mut dyn Read,
+        header_offset: u64,
+        buf: &mut Vec<u8>,
+    ) -> io::Result<Self> {
+        let header = reader.read_pod::<types::LocalFileHeader>()?;
+
+        let [file_name, extra_fields] = reader.read_variable_fields(
+            [
+                header.file_name_length.get() as _,
+                header.extra_fields_length.get() as _,
+            ],
+            buf,
+        )?;
+
+        Metadata::from_local_header(header, header_offset, file_name, extra_fields)
+            .ok_or_else(invalid_entry)
+    }
+
+    fn from_local_header(
         header: types::LocalFileHeader,
         header_offset: u64,
         file_name: &[u8],
@@ -389,7 +406,7 @@ impl Metadata {
             crc32: header.crc32.get(),
             flags,
             header_offset,
-            data_offset: atomic::AtomicU64::new(header_offset + header.total_size()),
+            data_offset: header_offset + header.total_size(),
 
             compressed_size: header.compressed_size.get() as u64,
             uncompressed_size: header.uncompressed_size.get() as u64,
@@ -411,7 +428,23 @@ impl Metadata {
         Some(meta)
     }
 
-    pub(crate) fn from_central_header(
+    fn read_central(reader: &mut dyn ReadSeek, buf: &mut Vec<u8>) -> io::Result<Self> {
+        let header = reader.read_pod::<types::CentralFileHeader>()?;
+
+        let [file_name, extra_fields, comment] = reader.read_variable_fields(
+            [
+                header.file_name_length.get() as _,
+                header.extra_fields_length.get() as _,
+                header.file_comment_length.get() as _,
+            ],
+            buf,
+        )?;
+
+        Self::from_central_header(header, &file_name, &extra_fields, &comment)
+            .ok_or_else(invalid_entry)
+    }
+
+    fn from_central_header(
         header: types::CentralFileHeader,
         file_name: &[u8],
         extra_fields: &[u8],
@@ -435,7 +468,7 @@ impl Metadata {
             crc32: header.crc32.get(),
             flags,
             header_offset: header.local_header_offset.get() as u64,
-            data_offset: atomic::AtomicU64::new(0),
+            data_offset: 0,
 
             compressed_size: header.compressed_size.get() as u64,
             uncompressed_size: header.uncompressed_size.get() as u64,
@@ -553,37 +586,8 @@ impl Metadata {
         self.comment.as_deref()
     }
 
-    #[cold]
-    fn set_data_offset(&self, reader: &mut dyn ReadSeek) -> io::Result<()> {
-        reader.seek(io::SeekFrom::Start(self.header_offset))?;
-        let header = reader.read_pod::<types::LocalFileHeader>()?;
-
-        if { header.signature } != types::LocalFileHeader::SIGNATURE
-            || header.compression_method.get() != self.compression_method.0
-        {
-            return Err(invalid_entry());
-        }
-
-        let extra_data = (header.file_name_length.get() + header.extra_fields_length.get()) as i64;
-        reader.seek_relative(extra_data)?;
-
-        self.data_offset.store(
-            self.header_offset + header.total_size(),
-            atomic::Ordering::Relaxed,
-        );
-
-        Ok(())
-    }
-
     pub fn read_raw<R: Read + Seek>(&self, mut reader: R) -> io::Result<io::Take<R>> {
-        // This check is racy but that's fine
-        match self.data_offset.load(atomic::Ordering::Relaxed) {
-            0 => self.set_data_offset(&mut reader)?,
-            n => {
-                reader.seek(io::SeekFrom::Start(n))?;
-            }
-        }
-
+        reader.seek(io::SeekFrom::Start(self.data_offset))?;
         Ok(reader.take(self.compressed_size))
     }
 
