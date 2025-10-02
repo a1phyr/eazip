@@ -11,8 +11,6 @@ use crate::{
 };
 
 mod extra_field;
-pub mod stream;
-
 use extra_field::{ExtraField, ExtraFields};
 
 trait ReadExt: Read {
@@ -103,13 +101,13 @@ fn parse_central_directory(reader: &mut dyn ReadSeek, len: usize) -> io::Result<
     // Check that the local headers match the central ones and fill the missing data offset
     for entry in &mut entries {
         reader.seek(io::SeekFrom::Start(entry.header_offset))?;
-        let local_entry = Metadata::read_local(reader, entry.header_offset, &mut buf)?;
+        let local_entry = Metadata::read_local(reader, &mut buf)?;
 
         if entry.compression_method != local_entry.compression_method {
             return Err(invalid_entry());
         }
 
-        entry.data_offset = local_entry.data_offset;
+        entry.data_offset = entry.header_offset + local_entry.data_offset;
     }
 
     Ok(entries)
@@ -314,11 +312,8 @@ enum FileType {
 }
 
 impl FileType {
-    fn test(attr: Option<u32>, name: &str) -> Option<Self> {
-        let has_attr = |flag| match attr {
-            Some(attr) => attr & flag == flag,
-            None => false,
-        };
+    fn test(attr: u32, name: &str) -> Option<Self> {
+        let has_attr = |flag| attr & flag == flag;
 
         let is_file = has_attr(10 << 28);
         let is_dir = has_attr(1 << 4) || has_attr(4 << 28) || name.ends_with('/');
@@ -355,7 +350,6 @@ pub struct Metadata {
     pub uncompressed_size: u64,
     pub compression_method: CompressionMethod,
     pub crc32: u32,
-    external_attributes: Option<u32>,
     file_type: FileType,
 
     pub modification_time: Option<Timestamp>,
@@ -363,15 +357,11 @@ pub struct Metadata {
     pub creation_time: Option<Timestamp>,
 
     name: Box<str>,
-    comment: Option<Box<str>>,
+    comment: Box<str>,
 }
 
 impl Metadata {
-    fn read_local(
-        reader: &mut dyn Read,
-        header_offset: u64,
-        buf: &mut Vec<u8>,
-    ) -> io::Result<Self> {
+    fn read_local(reader: &mut dyn Read, buf: &mut Vec<u8>) -> io::Result<Self> {
         let header = reader.read_pod::<types::LocalFileHeader>()?;
 
         let [file_name, extra_fields] = reader.read_variable_fields(
@@ -382,13 +372,11 @@ impl Metadata {
             buf,
         )?;
 
-        Metadata::from_local_header(header, header_offset, file_name, extra_fields)
-            .ok_or_else(invalid_entry)
+        Metadata::from_local_header(header, file_name, extra_fields).ok_or_else(invalid_entry)
     }
 
     fn from_local_header(
         header: types::LocalFileHeader,
-        header_offset: u64,
         file_name: &[u8],
         extra_fields: &[u8],
     ) -> Option<Self> {
@@ -400,27 +388,24 @@ impl Metadata {
         }
 
         let (name, name_crc) = check_string(file_name, is_unicode)?;
-        let file_type = FileType::test(None, &name)?;
 
         let mut meta = Self {
             crc32: header.crc32.get(),
             flags,
-            header_offset,
-            data_offset: header_offset + header.total_size(),
+            header_offset: 0,
+            data_offset: header.total_size(),
 
             compressed_size: header.compressed_size.get() as u64,
             uncompressed_size: header.uncompressed_size.get() as u64,
             compression_method: CompressionMethod(header.compression_method.get()),
-            external_attributes: None,
-            file_type,
+            file_type: FileType::File,
 
             modification_time: None,
             access_time: None,
             creation_time: None,
 
-            name: name.into(),
-
-            comment: None,
+            name,
+            comment: Box::default(),
         };
 
         meta.parse_extra_fields(ExtraFields(extra_fields), name_crc, None)?;
@@ -461,7 +446,7 @@ impl Metadata {
 
         let (comment, comment_crc) = check_string(comment, is_unicode)?;
         let (name, name_crc) = check_string(file_name, is_unicode)?;
-        let external_attributes = Some(header.external_attributes.get());
+        let external_attributes = header.external_attributes.get();
         let file_type = FileType::test(external_attributes, &name)?;
 
         let mut meta = Self {
@@ -473,16 +458,14 @@ impl Metadata {
             compressed_size: header.compressed_size.get() as u64,
             uncompressed_size: header.uncompressed_size.get() as u64,
             compression_method: CompressionMethod(header.compression_method.get()),
-            external_attributes,
             file_type,
 
             modification_time: None,
             access_time: None,
             creation_time: None,
 
-            name: name.into(),
-
-            comment: Some(comment.into()),
+            name,
+            comment,
         };
 
         meta.parse_extra_fields(ExtraFields(extra_fields), name_crc, comment_crc)?;
@@ -512,12 +495,12 @@ impl Metadata {
                     info.end()?;
                 }
                 ExtraField::UnicodeComment(unicode) => {
-                    let comment = self.comment.as_mut()?;
-                    let crc32 = comment_crc.unwrap_or_else(|| crc32fast::hash(comment.as_bytes()));
+                    let crc32 =
+                        comment_crc.unwrap_or_else(|| crc32fast::hash(self.comment.as_bytes()));
                     if unicode.header_comment_crc32 != crc32 {
                         return None;
                     }
-                    self.comment = Some(unicode.comment.into());
+                    self.comment = unicode.comment.into();
                 }
 
                 ExtraField::UnicodeName(unicode) => {
@@ -582,8 +565,8 @@ impl Metadata {
         Some(&self.name)
     }
 
-    pub fn comment(&self) -> Option<&str> {
-        self.comment.as_deref()
+    pub fn comment(&self) -> &str {
+        &self.comment
     }
 
     pub fn read_raw<R: Read + Seek>(&self, mut reader: R) -> io::Result<io::Take<R>> {
@@ -594,10 +577,6 @@ impl Metadata {
     pub fn read<R: BufRead + Seek>(&self, reader: R) -> io::Result<impl Read + use<R>> {
         let reader = Decompressor::new(self.read_raw(reader)?, self.compression_method)?;
         Ok(self.read_with_decompressor(reader))
-    }
-
-    fn read_from_raw<R: BufRead>(&self, reader: R) -> io::Result<impl Read + use<R>> {
-        Ok(self.read_with_decompressor(Decompressor::new(reader, self.compression_method)?))
     }
 
     pub fn read_with_decompressor<R: Read>(&self, reader: R) -> impl Read + use<R> {
@@ -661,7 +640,6 @@ impl fmt::Debug for Metadata {
             .field("uncompressed_size", &self.uncompressed_size)
             .field("compression_method", &self.compression_method)
             .field("file_type", &self.file_type)
-            .field("external_attributes", &self.external_attributes)
             .field("modification_time", &self.modification_time)
             .field("access_time", &self.access_time)
             .field("creation_time", &self.creation_time)
