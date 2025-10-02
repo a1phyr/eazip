@@ -48,15 +48,15 @@ impl<'a> DataParser<'a> {
 }
 
 #[derive(Clone)]
-pub(crate) struct ExtraFields(pub Box<[u8]>);
+pub(crate) struct ExtraFields<'a>(pub &'a [u8]);
 
-impl ExtraFields {
+impl ExtraFields<'_> {
     pub fn iter(&self) -> ExtraFieldIterator<'_> {
-        ExtraFieldIterator(DataParser(&self.0))
+        ExtraFieldIterator(DataParser(self.0))
     }
 }
 
-impl fmt::Debug for ExtraFields {
+impl fmt::Debug for ExtraFields<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         struct FromFn<F: Fn(&mut fmt::Formatter<'_>) -> fmt::Result>(F);
 
@@ -243,7 +243,7 @@ impl ExtendedTimestamp {
 #[derive(Debug, Clone)]
 pub struct UnicodeComment<'a> {
     pub version: u8,
-    pub header_name_crc32: u32,
+    pub header_comment_crc32: u32,
     pub comment: &'a str,
 }
 
@@ -254,13 +254,13 @@ impl<'a> UnicodeComment<'a> {
             return None;
         }
 
-        let header_name_crc32 = data.read_u32()?;
+        let header_comment_crc32 = data.read_u32()?;
 
         let comment = std::str::from_utf8(data.0).ok()?;
 
         Some(UnicodeComment {
             version,
-            header_name_crc32,
+            header_comment_crc32,
             comment,
         })
     }

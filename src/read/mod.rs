@@ -17,10 +17,21 @@ pub mod stream;
 use extra_field::{ExtraField, ExtraFields};
 
 trait ReadExt: Read {
-    fn read_variable(&mut self, size: usize) -> io::Result<Box<[u8]>> {
-        let mut buf = vec![0; size].into_boxed_slice();
-        self.read_exact(&mut buf)?;
-        Ok(buf)
+    fn read_variable_fields<'a, const N: usize>(
+        &mut self,
+        sizes: [usize; N],
+        buf: &'a mut Vec<u8>,
+    ) -> io::Result<[&'a [u8]; N]> {
+        let total = sizes.iter().sum();
+        buf.resize(total, 0);
+        self.read_exact(buf)?;
+
+        let mut buf = &**buf;
+        Ok(sizes.map(|size| {
+            let (head, tail) = buf.split_at(size);
+            buf = tail;
+            head
+        }))
     }
 
     fn read_pod<T: types::Pod>(&mut self) -> io::Result<T> {
@@ -82,14 +93,28 @@ fn validate_symlink(name: &str, target: &str) -> bool {
 trait ReadSeek: Read + Seek {}
 impl<R: Read + Seek> ReadSeek for R {}
 
-fn parse_central_directory_header(reader: &mut dyn ReadSeek) -> io::Result<Metadata> {
-    let header = reader.read_pod::<types::CentralFileHeader>()?;
+fn parse_central_directory(reader: &mut dyn ReadSeek, len: usize) -> io::Result<Vec<Metadata>> {
+    let mut entries = Vec::with_capacity(len);
 
-    let file_name = reader.read_variable(header.file_name_length.get() as _)?;
-    let extra_fields = reader.read_variable(header.extra_fields_length.get() as _)?;
-    let comment = reader.read_variable(header.file_comment_length.get() as _)?;
+    let mut buf = Vec::new();
+    for _ in 0..len {
+        let header = reader.read_pod::<types::CentralFileHeader>()?;
 
-    Metadata::from_central_header(header, file_name, extra_fields, comment)
+        let [file_name, extra_fields, comment] = reader.read_variable_fields(
+            [
+                header.file_name_length.get() as _,
+                header.extra_fields_length.get() as _,
+                header.file_comment_length.get() as _,
+            ],
+            &mut buf,
+        )?;
+
+        let entry = Metadata::from_central_header(header, &file_name, &extra_fields, &comment)
+            .ok_or_else(invalid_entry)?;
+        entries.push(entry);
+    }
+
+    Ok(entries)
 }
 
 struct CentralDirectoryEnd {
@@ -228,15 +253,8 @@ impl RawArchive {
 
         reader.seek(io::SeekFrom::Start(central_dir.offset))?;
 
-        let len = central_dir.entries as usize;
-        let mut entries = Vec::with_capacity(len);
-
-        for _ in 0..len {
-            entries.push(parse_central_directory_header(reader)?);
-        }
-
         Ok(Self {
-            entries,
+            entries: parse_central_directory(reader, central_dir.entries as usize)?,
             comment: central_dir.comment,
         })
     }
@@ -312,9 +330,22 @@ impl FileType {
             (_, false, false) => Some(FileType::File),
             (false, true, false) => Some(FileType::Directory),
             (false, false, true) => Some(FileType::Symlink),
-            _ => None,
+            x => panic!("fds = {x:?}"),
         }
     }
+}
+
+fn check_string(raw: &[u8], is_unicode: bool) -> Option<(Box<str>, Option<u32>)> {
+    Some(if is_unicode {
+        (str::from_utf8(raw).ok()?.into(), None)
+    } else {
+        let string = cp437::convert(raw);
+        let crc = match string {
+            std::borrow::Cow::Borrowed(_) => None,
+            std::borrow::Cow::Owned(_) => Some(crc32fast::hash(raw)),
+        };
+        (string.into_owned().into_boxed_str(), crc)
+    })
 }
 
 pub struct Metadata {
@@ -333,10 +364,7 @@ pub struct Metadata {
     pub access_time: Option<Timestamp>,
     pub creation_time: Option<Timestamp>,
 
-    raw_name: Box<[u8]>,
     name: Box<str>,
-
-    raw_comment: Option<Box<[u8]>>,
     comment: Option<Box<str>>,
 }
 
@@ -344,23 +372,18 @@ impl Metadata {
     pub(crate) fn from_local_header(
         header: types::LocalFileHeader,
         header_offset: u64,
-        file_name: Box<[u8]>,
-        extra_fields: Box<[u8]>,
-    ) -> io::Result<Self> {
+        file_name: &[u8],
+        extra_fields: &[u8],
+    ) -> Option<Self> {
         let flags = header.flags.get();
         let is_unicode = flags & (1 << 11) != 0;
 
         if { header.signature } != types::LocalFileHeader::SIGNATURE {
-            return Err(invalid_entry());
+            return None;
         }
 
-        let name = if is_unicode {
-            String::from_utf8_lossy(&file_name)
-        } else {
-            cp437::convert(&file_name)
-        };
-
-        let file_type = FileType::test(None, &name).ok_or_else(invalid_entry)?;
+        let (name, name_crc) = check_string(file_name, is_unicode)?;
+        let file_type = FileType::test(None, &name)?;
 
         let mut meta = Self {
             crc32: header.crc32.get(),
@@ -379,44 +402,34 @@ impl Metadata {
             creation_time: None,
 
             name: name.into(),
-            raw_name: file_name,
 
             comment: None,
-            raw_comment: None,
         };
 
-        meta.parse_extra_fields(ExtraFields(extra_fields))
-            .ok_or_else(invalid_entry)?;
+        meta.parse_extra_fields(ExtraFields(extra_fields), name_crc, None)?;
 
-        Ok(meta)
+        Some(meta)
     }
 
     pub(crate) fn from_central_header(
         header: types::CentralFileHeader,
-        raw_name: Box<[u8]>,
-        extra_fields: Box<[u8]>,
-        raw_comment: Box<[u8]>,
-    ) -> io::Result<Self> {
+        file_name: &[u8],
+        extra_fields: &[u8],
+        comment: &[u8],
+    ) -> Option<Self> {
         let flags = header.flags.get();
         let is_unicode = flags & (1 << 11) != 0;
 
         if { header.signature } != types::CentralFileHeader::SIGNATURE
             || header.disk_number.get() != 0
         {
-            return Err(invalid_entry());
+            return None;
         }
 
-        let (name, comment) = if is_unicode {
-            (
-                String::from_utf8_lossy(&raw_name),
-                String::from_utf8_lossy(&raw_comment),
-            )
-        } else {
-            (cp437::convert(&raw_name), cp437::convert(&raw_comment))
-        };
-
+        let (comment, comment_crc) = check_string(comment, is_unicode)?;
+        let (name, name_crc) = check_string(file_name, is_unicode)?;
         let external_attributes = Some(header.external_attributes.get());
-        let file_type = FileType::test(external_attributes, &name).ok_or_else(invalid_entry)?;
+        let file_type = FileType::test(external_attributes, &name)?;
 
         let mut meta = Self {
             crc32: header.crc32.get(),
@@ -435,19 +448,21 @@ impl Metadata {
             creation_time: None,
 
             name: name.into(),
-            raw_name,
 
             comment: Some(comment.into()),
-            raw_comment: Some(raw_comment),
         };
 
-        meta.parse_extra_fields(ExtraFields(extra_fields))
-            .ok_or_else(invalid_entry)?;
+        meta.parse_extra_fields(ExtraFields(extra_fields), name_crc, comment_crc)?;
 
-        Ok(meta)
+        Some(meta)
     }
 
-    fn parse_extra_fields(&mut self, extra_fields: ExtraFields) -> Option<()> {
+    fn parse_extra_fields(
+        &mut self,
+        extra_fields: ExtraFields,
+        name_crc: Option<u32>,
+        comment_crc: Option<u32>,
+    ) -> Option<()> {
         for field in extra_fields.iter() {
             match field {
                 ExtraField::Zip64ExtendedInformation(mut info) => {
@@ -463,19 +478,21 @@ impl Metadata {
                     // Disk number must be 0
                     info.end()?;
                 }
-                ExtraField::UnicodeComment(comment) => {
-                    let raw_comment = self.raw_comment.as_deref()?;
-                    if comment.header_name_crc32 == crc32fast::hash(raw_comment) {
-                        self.comment = Some(comment.comment.into());
-                        self.raw_comment = Some(comment.comment.as_bytes().into());
+                ExtraField::UnicodeComment(unicode) => {
+                    let comment = self.comment.as_mut()?;
+                    let crc32 = comment_crc.unwrap_or_else(|| crc32fast::hash(comment.as_bytes()));
+                    if unicode.header_comment_crc32 != crc32 {
+                        return None;
                     }
+                    self.comment = Some(unicode.comment.into());
                 }
 
-                ExtraField::UnicodeName(name) => {
-                    if name.header_name_crc32 == crc32fast::hash(&self.raw_name) {
-                        self.name = name.name.into();
-                        self.raw_name = name.name.as_bytes().into();
+                ExtraField::UnicodeName(unicode) => {
+                    let crc32 = name_crc.unwrap_or_else(|| crc32fast::hash(self.name.as_bytes()));
+                    if unicode.header_name_crc32 != crc32 {
+                        return None;
                     }
+                    self.name = unicode.name.into();
                 }
 
                 ExtraField::Ntfs(ntfs) => {
@@ -532,16 +549,8 @@ impl Metadata {
         Some(&self.name)
     }
 
-    pub fn raw_name(&self) -> &[u8] {
-        &self.raw_name
-    }
-
     pub fn comment(&self) -> Option<&str> {
         self.comment.as_deref()
-    }
-
-    pub fn raw_comment(&self) -> Option<&[u8]> {
-        self.raw_comment.as_deref()
     }
 
     #[cold]

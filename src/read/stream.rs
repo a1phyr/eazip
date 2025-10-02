@@ -30,6 +30,8 @@ fn skip<R: BufRead>(r: R, amt: u64) -> io::Result<()> {
 pub struct ZipArchive<R: BufRead> {
     reader: Counter<R>,
     data_left: u64,
+
+    buf: Vec<u8>,
 }
 
 impl<R: BufRead> ZipArchive<R> {
@@ -37,6 +39,8 @@ impl<R: BufRead> ZipArchive<R> {
         Self {
             reader: Counter::new(reader),
             data_left: 0,
+
+            buf: Vec::new(),
         }
     }
 
@@ -60,14 +64,16 @@ impl<R: BufRead> ZipArchive<R> {
             }
         }
 
-        let file_name = self
-            .reader
-            .read_variable(header.file_name_length.get() as _)?;
-        let extra_fields = self
-            .reader
-            .read_variable(header.extra_fields_length.get() as _)?;
+        let [name, extra_fields] = self.reader.read_variable_fields(
+            [
+                header.file_name_length.get() as _,
+                header.extra_fields_length.get() as _,
+            ],
+            &mut self.buf,
+        )?;
 
-        let metadata = Metadata::from_local_header(header, offset, file_name, extra_fields)?;
+        let metadata = Metadata::from_local_header(header, offset, name, extra_fields)
+            .ok_or_else(super::invalid_entry)?;
 
         if (metadata.flags & 8) != 0 {
             return Err(io::Error::new(
