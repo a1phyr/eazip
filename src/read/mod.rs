@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    fmt,
     io::{self, BufRead, Read, Seek},
 };
 
@@ -343,6 +342,7 @@ fn check_string(raw: &[u8], is_unicode: bool) -> Option<(Box<str>, Option<u32>)>
     })
 }
 
+#[derive(Debug)]
 pub struct Metadata {
     is_encrypted: bool,
     header_offset: u64,
@@ -630,24 +630,6 @@ impl Metadata {
         }
 
         Ok(())
-    }
-}
-
-impl fmt::Debug for Metadata {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Metadata")
-            .field("crc32", &self.crc32)
-            .field("is_encrypted", &self.is_encrypted)
-            .field("compressed_size", &self.compressed_size)
-            .field("uncompressed_size", &self.uncompressed_size)
-            .field("compression_method", &self.compression_method)
-            .field("file_type", &self.file_type)
-            .field("modification_time", &self.modification_time)
-            .field("access_time", &self.access_time)
-            .field("creation_time", &self.creation_time)
-            .field("name", &self.name)
-            .field("comment", &self.comment)
-            .finish()
     }
 }
 
