@@ -151,23 +151,23 @@ impl<'a> fmt::Debug for Zip64ExtendedInformation<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct NtfsTimes {
-    pub mtime: Timestamp,
-    pub atime: Timestamp,
-    pub ctime: Timestamp,
+    pub mtime: Option<Timestamp>,
+    pub atime: Option<Timestamp>,
+    pub ctime: Option<Timestamp>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct Ntfs {
-    pub times: Option<NtfsTimes>,
+    pub times: NtfsTimes,
 }
 
 impl Ntfs {
     fn parse(mut data: DataParser<'_>) -> Option<Self> {
         let _reserved = data.read_u32()?;
 
-        let mut times = None;
+        let mut ntfs = Ntfs::default();
 
         while !data.0.is_empty() {
             let typ = data.read_u16()?;
@@ -176,17 +176,22 @@ impl Ntfs {
 
             match typ {
                 0x0001 => {
-                    times = Some(NtfsTimes {
-                        mtime: Timestamp::from_ntfs(data.read_u64()?),
-                        atime: Timestamp::from_ntfs(data.read_u64()?),
-                        ctime: Timestamp::from_ntfs(data.read_u64()?),
-                    });
+                    let mut read_time = || {
+                        let ts = data.read_u64()?;
+                        Some((ts != 0).then(|| Timestamp::from_ntfs(ts)))
+                    };
+
+                    ntfs.times = NtfsTimes {
+                        mtime: read_time()?,
+                        atime: read_time()?,
+                        ctime: read_time()?,
+                    };
                 }
                 _ => continue, // unsupported
             }
         }
 
-        Some(Ntfs { times })
+        Some(ntfs)
     }
 }
 

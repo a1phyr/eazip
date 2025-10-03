@@ -516,11 +516,9 @@ impl Metadata {
                 }
 
                 ExtraField::Ntfs(ntfs) => {
-                    if let Some(times) = ntfs.times {
-                        self.modification_time = Some(times.mtime);
-                        self.access_time = Some(times.atime);
-                        self.creation_time = Some(times.ctime);
-                    }
+                    self.modification_time = ntfs.times.mtime;
+                    self.access_time = ntfs.times.atime;
+                    self.creation_time = ntfs.times.ctime;
                 }
 
                 ExtraField::ExtendedTimestamp(ts) => {
