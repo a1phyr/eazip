@@ -305,7 +305,7 @@ impl RawArchive {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FileType {
+pub enum FileType {
     File,
     Directory,
     Symlink,
@@ -344,7 +344,7 @@ fn check_string(raw: &[u8], is_unicode: bool) -> Option<(Box<str>, Option<u32>)>
 }
 
 pub struct Metadata {
-    flags: u16,
+    is_encrypted: bool,
     header_offset: u64,
     data_offset: u64,
 
@@ -352,7 +352,7 @@ pub struct Metadata {
     pub uncompressed_size: u64,
     pub compression_method: CompressionMethod,
     pub crc32: u32,
-    file_type: FileType,
+    pub file_type: FileType,
 
     pub modification_time: Option<Timestamp>,
     pub access_time: Option<Timestamp>,
@@ -384,6 +384,7 @@ impl Metadata {
     ) -> Option<Self> {
         let flags = header.flags.get();
         let is_unicode = flags & (1 << 11) != 0;
+        let is_encrypted = flags & (1 << 0) != 0;
 
         if { header.signature } != types::LocalFileHeader::SIGNATURE {
             return None;
@@ -393,7 +394,7 @@ impl Metadata {
 
         let mut meta = Self {
             crc32: header.crc32.get(),
-            flags,
+            is_encrypted,
             header_offset: 0,
             data_offset: header.total_size(),
 
@@ -439,6 +440,7 @@ impl Metadata {
     ) -> Option<Self> {
         let flags = header.flags.get();
         let is_unicode = flags & (1 << 11) != 0;
+        let is_encrypted = flags & (1 << 0) != 0;
 
         if { header.signature } != types::CentralFileHeader::SIGNATURE
             || header.disk_number.get() != 0
@@ -453,7 +455,7 @@ impl Metadata {
 
         let mut meta = Self {
             crc32: header.crc32.get(),
-            flags,
+            is_encrypted,
             header_offset: header.local_header_offset.get() as u64,
             data_offset: 0,
 
@@ -535,7 +537,7 @@ impl Metadata {
     }
 
     pub fn is_encrypted(&self) -> bool {
-        self.flags & (1 << 0) != 0
+        self.is_encrypted
     }
 
     #[inline]
@@ -637,7 +639,7 @@ impl fmt::Debug for Metadata {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Metadata")
             .field("crc32", &self.crc32)
-            .field("flags", &self.flags)
+            .field("is_encrypted", &self.is_encrypted)
             .field("compressed_size", &self.compressed_size)
             .field("uncompressed_size", &self.uncompressed_size)
             .field("compression_method", &self.compression_method)
