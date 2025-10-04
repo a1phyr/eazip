@@ -722,8 +722,8 @@ impl<R: BufRead + Seek> ZipFile<'_, R> {
 }
 
 #[cold]
-fn too_large() -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, "file is larger than expected")
+fn bad_length() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, "unexpected file length")
 }
 
 pub struct LengthChecker<R> {
@@ -734,7 +734,10 @@ pub struct LengthChecker<R> {
 impl<R: Read> Read for LengthChecker<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let n = self.reader.read(buf)?;
-        self.expected = self.expected.checked_sub(n as u64).ok_or_else(too_large)?;
+        if n == 0 && self.expected != 0 {
+            return Err(bad_length());
+        }
+        self.expected = self.expected.checked_sub(n as u64).ok_or_else(bad_length)?;
         Ok(n)
     }
 
