@@ -89,7 +89,11 @@ fn validate_symlink(name: &str, target: &str) -> bool {
 trait ReadSeek: Read + Seek {}
 impl<R: Read + Seek> ReadSeek for R {}
 
-fn parse_central_directory(reader: &mut dyn ReadSeek, len: u64) -> io::Result<Vec<Metadata>> {
+fn read_central_directory(
+    reader: &mut dyn ReadSeek,
+    offset: u64,
+    len: u64,
+) -> io::Result<Vec<Metadata>> {
     // We can't support zip archives with more than ~2 billions entries on 32 bits
     // platforms, but these archives are probably broken anyway.
     let len = len.try_into().map_err(|_| invalid_zip())?;
@@ -97,6 +101,8 @@ fn parse_central_directory(reader: &mut dyn ReadSeek, len: u64) -> io::Result<Ve
     // FIXME: change to `try_with_capacity` once it is stable.
     let mut entries = Vec::new();
     entries.try_reserve_exact(len)?;
+
+    reader.seek(io::SeekFrom::Start(offset))?;
 
     let mut buf = Vec::new();
     for _ in 0..len {
@@ -118,27 +124,22 @@ fn parse_central_directory(reader: &mut dyn ReadSeek, len: u64) -> io::Result<Ve
     Ok(entries)
 }
 
-struct CentralDirectoryEnd {
+struct CentralDirectory {
     offset: u64,
+    size: u64,
+    eocd_offset: u64,
     entries: u64,
-    comment: Box<[u8]>,
 }
 
-impl CentralDirectoryEnd {
-    fn find_in_buffer(
-        buffer_offset: u64,
-        buffer: &[u8],
-    ) -> io::Result<Option<(u64, types::EndOfCentralDirectory, Box<[u8]>)>> {
+type EocdData = (u64, types::EndOfCentralDirectory, Box<[u8]>);
+
+impl CentralDirectory {
+    fn find_end_in_buffer(buffer_offset: u64, buffer: &[u8]) -> io::Result<Option<EocdData>> {
         let signature = types::EndOfCentralDirectory::SIGNATURE.as_bytes();
 
-        for i in memchr::memmem::rfind_iter(buffer, signature) {
+        if let Some(i) = memchr::memmem::rfind(buffer, signature) {
             let mut buffer = &buffer[i..];
             let record: types::EndOfCentralDirectory = buffer.read_pod()?;
-
-            if record.comment_length.get() as usize != buffer.len() {
-                continue;
-            }
-
             let offset = buffer_offset + i as u64;
             return Ok(Some((offset, record, Box::from(buffer))));
         }
@@ -146,9 +147,7 @@ impl CentralDirectoryEnd {
         Ok(None)
     }
 
-    fn find(
-        reader: &mut dyn ReadSeek,
-    ) -> io::Result<(u64, types::EndOfCentralDirectory, Box<[u8]>)> {
+    fn find_end(reader: &mut dyn ReadSeek) -> io::Result<EocdData> {
         let size = reader.seek(io::SeekFrom::End(0))?;
 
         if size < 22 {
@@ -160,7 +159,7 @@ impl CentralDirectoryEnd {
 
         let record = reader.read_pod::<types::EndOfCentralDirectory>()?;
 
-        if let Some(eocd) = Self::find_in_buffer(pos, record.as_bytes())? {
+        if let Some(eocd) = Self::find_end_in_buffer(pos, record.as_bytes())? {
             return Ok(eocd);
         }
 
@@ -171,20 +170,24 @@ impl CentralDirectoryEnd {
         let mut buffer = vec![0; read_size as usize];
         reader.read_exact(&mut buffer)?;
 
-        if let Some(eocd) = Self::find_in_buffer(pos, &buffer)? {
+        if let Some(eocd) = Self::find_end_in_buffer(pos, &buffer)? {
             return Ok(eocd);
         }
 
         Err(not_a_zip())
     }
 
-    fn read64(reader: &mut dyn ReadSeek, offset: u64, comment: Box<[u8]>) -> io::Result<Self> {
-        reader.seek(io::SeekFrom::Start(
-            offset - size_of::<types::EndOfCentralDirectory64Locator>() as u64,
-        ))?;
+    fn read_eocd64(reader: &mut dyn ReadSeek, offset: u64) -> io::Result<Self> {
+        let locator_offset = offset
+            .checked_sub(size_of::<types::EndOfCentralDirectory64Locator>() as u64)
+            .ok_or_else(invalid_zip)?;
+        reader.seek(io::SeekFrom::Start(locator_offset))?;
         let locator: types::EndOfCentralDirectory64Locator = reader.read_pod()?;
+        let eocd_offset = locator.central_directory_64_offset.get();
 
-        if locator.signature != types::EndOfCentralDirectory64Locator::SIGNATURE {
+        if locator.signature != types::EndOfCentralDirectory64Locator::SIGNATURE
+            || eocd_offset > locator_offset
+        {
             return Err(invalid_zip());
         }
 
@@ -192,9 +195,7 @@ impl CentralDirectoryEnd {
             return Err(multi_disk());
         }
 
-        reader.seek(io::SeekFrom::Start(
-            locator.central_directory_64_offset.get(),
-        ))?;
+        reader.seek(io::SeekFrom::Start(eocd_offset))?;
         let end_dir: types::EndOfCentralDirectory64 = reader.read_pod()?;
 
         // Yes, this is the third time that we do that stupid check
@@ -202,20 +203,25 @@ impl CentralDirectoryEnd {
             return Err(multi_disk());
         }
 
-        if { end_dir.total_entries } != { end_dir.entries_on_this_disk } {
+        if { end_dir.total_entries } != { end_dir.entries_on_this_disk }
+            || eocd_offset.checked_add(end_dir.record_size.get()) != Some(locator_offset)
+        {
             return Err(invalid_zip());
         }
 
         Ok(Self {
             offset: end_dir.central_directory_offset.get(),
+            size: end_dir.central_directory_size.get(),
+            eocd_offset,
             entries: end_dir.total_entries.get(),
-            comment,
         })
     }
 
-    fn read(reader: &mut dyn ReadSeek) -> io::Result<Self> {
-        let (offset, dir_end, comment) = Self::find(reader)?;
-
+    fn read_eocd(
+        reader: &mut dyn ReadSeek,
+        offset: u64,
+        dir_end: types::EndOfCentralDirectory,
+    ) -> io::Result<Self> {
         if dir_end.disk_number.get() != 0 || dir_end.disk_with_central_directory.get() != 0 {
             return Err(multi_disk());
         }
@@ -228,14 +234,43 @@ impl CentralDirectoryEnd {
             || dir_end.central_directory_offset.get() == u32::MAX
         {
             // This is a Zip64
-            return Self::read64(reader, offset, comment);
+            return Self::read_eocd64(reader, offset);
         }
 
-        Ok(CentralDirectoryEnd {
+        Ok(CentralDirectory {
             offset: dir_end.central_directory_offset.get() as _,
+            size: dir_end.central_directory_size.get() as _,
+            eocd_offset: offset,
             entries: dir_end.total_entries.get() as _,
-            comment,
         })
+    }
+
+    /// Validates that that the central directory has a decent size
+    fn validate_size(&self) -> Option<()> {
+        let min_size =
+            (size_of::<types::CentralFileHeader>() as u64 + 1).checked_mul(self.entries)?;
+        let expected_size = self.eocd_offset.checked_sub(self.offset)?;
+
+        if self.size < min_size || self.size != expected_size {
+            return None;
+        }
+
+        Some(())
+    }
+
+    fn parse(reader: &mut dyn ReadSeek) -> io::Result<(Vec<Metadata>, Box<[u8]>)> {
+        let (offset, dir_end, comment) = Self::find_end(reader)?;
+
+        if dir_end.comment_length.get() as usize != comment.len() {
+            return Err(invalid_zip());
+        }
+
+        let central_dir = Self::read_eocd(reader, offset, dir_end)?;
+        central_dir.validate_size().ok_or_else(invalid_zip)?;
+
+        let entries = read_central_directory(reader, central_dir.offset, central_dir.entries)?;
+
+        Ok((entries, comment))
     }
 }
 
@@ -246,18 +281,8 @@ pub struct RawArchive {
 
 impl RawArchive {
     pub fn new<R: Read + Seek>(reader: &mut R) -> io::Result<Self> {
-        Self::_new(reader)
-    }
-
-    fn _new(reader: &mut dyn ReadSeek) -> io::Result<Self> {
-        let central_dir = CentralDirectoryEnd::read(reader)?;
-
-        reader.seek(io::SeekFrom::Start(central_dir.offset))?;
-
-        Ok(Self {
-            entries: parse_central_directory(reader, central_dir.entries)?,
-            comment: central_dir.comment,
-        })
+        let (entries, comment) = CentralDirectory::parse(reader)?;
+        Ok(Self { entries, comment })
     }
 
     pub fn entries(&self) -> &[Metadata] {
