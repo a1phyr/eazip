@@ -89,8 +89,14 @@ fn validate_symlink(name: &str, target: &str) -> bool {
 trait ReadSeek: Read + Seek {}
 impl<R: Read + Seek> ReadSeek for R {}
 
-fn parse_central_directory(reader: &mut dyn ReadSeek, len: usize) -> io::Result<Vec<Metadata>> {
-    let mut entries = Vec::with_capacity(len);
+fn parse_central_directory(reader: &mut dyn ReadSeek, len: u64) -> io::Result<Vec<Metadata>> {
+    // We can't support zip archives with more than ~2 billions entries on 32 bits
+    // platforms, but these archives are probably broken anyway.
+    let len = len.try_into().map_err(|_| invalid_zip())?;
+
+    // FIXME: change to `try_with_capacity` once it is stable.
+    let mut entries = Vec::new();
+    entries.try_reserve_exact(len)?;
 
     let mut buf = Vec::new();
     for _ in 0..len {
@@ -249,7 +255,7 @@ impl RawArchive {
         reader.seek(io::SeekFrom::Start(central_dir.offset))?;
 
         Ok(Self {
-            entries: parse_central_directory(reader, central_dir.entries as usize)?,
+            entries: parse_central_directory(reader, central_dir.entries)?,
             comment: central_dir.comment,
         })
     }
