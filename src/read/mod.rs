@@ -158,6 +158,10 @@ pub struct Metadata {
 
     name: Box<str>,
     comment: Box<str>,
+
+    is_streaming: bool,
+    is_zip64: bool,
+    flags: u16,
 }
 
 impl Metadata {
@@ -167,8 +171,9 @@ impl Metadata {
         extra_fields: &[u8],
     ) -> Option<Self> {
         let flags = header.flags.get();
-        let is_unicode = flags & (1 << 11) != 0;
         let is_encrypted = flags & (1 << 0) != 0;
+        let is_streaming = flags & (1 << 3) != 0;
+        let is_unicode = flags & (1 << 11) != 0;
 
         if { header.signature } != types::LocalFileHeader::SIGNATURE {
             return None;
@@ -180,7 +185,7 @@ impl Metadata {
             crc32: header.crc32.get(),
             is_encrypted,
             header_offset: 0,
-            data_offset: header.total_size(),
+            data_offset: 0,
 
             compressed_size: header.compressed_size.get() as u64,
             uncompressed_size: header.uncompressed_size.get() as u64,
@@ -193,6 +198,10 @@ impl Metadata {
 
             name,
             comment: Box::default(),
+
+            is_streaming,
+            is_zip64: false,
+            flags,
         };
 
         meta.parse_extra_fields(ExtraFields(extra_fields), name_crc, None)?;
@@ -207,8 +216,9 @@ impl Metadata {
         comment: &[u8],
     ) -> Option<Self> {
         let flags = header.flags.get();
-        let is_unicode = flags & (1 << 11) != 0;
         let is_encrypted = flags & (1 << 0) != 0;
+        let is_streaming = flags & (1 << 3) != 0;
+        let is_unicode = flags & (1 << 11) != 0;
 
         if { header.signature } != types::CentralFileHeader::SIGNATURE
             || header.disk_number.get() != 0
@@ -238,6 +248,10 @@ impl Metadata {
 
             name,
             comment,
+
+            is_streaming,
+            is_zip64: false,
+            flags,
         };
 
         meta.parse_extra_fields(ExtraFields(extra_fields), name_crc, comment_crc)?;
@@ -265,6 +279,7 @@ impl Metadata {
                     }
                     // Disk number must be 0
                     info.end()?;
+                    self.is_zip64 = true;
                 }
                 ExtraField::UnicodeComment(unicode) => {
                     let crc32 =

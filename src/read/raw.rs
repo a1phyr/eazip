@@ -1,5 +1,8 @@
 use super::{Metadata, ReadSeek};
-use crate::types::{self, Pod};
+use crate::{
+    types::{self, Pod},
+    utils::Counter,
+};
 use std::io;
 
 #[inline]
@@ -145,7 +148,7 @@ fn read_eocd64(reader: &mut dyn ReadSeek, offset: u64) -> io::Result<CentralDire
     }
 
     if { end_dir.total_entries } != { end_dir.entries_on_this_disk }
-        || eocd_offset.checked_add(end_dir.record_size.get()) != Some(locator_offset)
+        || eocd_offset.checked_add(end_dir.record_size.get() + 12) != Some(locator_offset)
     {
         return Err(invalid_zip());
     }
@@ -185,7 +188,10 @@ fn read_eocd(
     })
 }
 
-fn read_local_header(reader: &mut dyn ReadSeek, buf: &mut Vec<u8>) -> io::Result<Metadata> {
+fn read_local_header(
+    reader: &mut Counter<&mut dyn ReadSeek>,
+    buf: &mut Vec<u8>,
+) -> io::Result<Metadata> {
     let header = reader.read_pod::<types::LocalFileHeader>()?;
 
     let [file_name, extra_fields] = reader.read_variable_fields(
@@ -215,11 +221,44 @@ fn read_central_header(reader: &mut dyn ReadSeek, buf: &mut Vec<u8>) -> io::Resu
         .ok_or_else(invalid_entry)
 }
 
+fn read_data_descriptor(
+    reader: &mut Counter<&mut dyn ReadSeek>,
+    meta: &mut Metadata,
+) -> io::Result<()> {
+    if !meta.is_streaming {
+        return Ok(());
+    }
+
+    if meta.is_zip64 {
+        let descriptor = reader.read_pod::<types::DataDescriptor64>()?;
+        if descriptor.signature != types::DataDescriptor64::SIGNATURE {
+            return Err(invalid_entry());
+        }
+        meta.compressed_size = descriptor.compressed_size.get();
+        meta.uncompressed_size = descriptor.uncompressed_size.get();
+        meta.crc32 = descriptor.crc32.get();
+    } else {
+        let descriptor = reader.read_pod::<types::DataDescriptor32>()?;
+        if descriptor.signature != types::DataDescriptor32::SIGNATURE {
+            return Err(invalid_entry());
+        }
+        meta.compressed_size = descriptor.compressed_size.get() as _;
+        meta.uncompressed_size = descriptor.uncompressed_size.get() as _;
+        meta.crc32 = descriptor.crc32.get();
+    }
+
+    Ok(())
+}
+
 fn read_central_directory(
     reader: &mut dyn ReadSeek,
     offset: u64,
     len: u64,
 ) -> io::Result<Vec<Metadata>> {
+    if len == 0 {
+        return Ok(Vec::new());
+    }
+
     // We can't support zip archives with more than ~2 billions entries on 32 bits
     // platforms, but these archives are probably broken anyway.
     let len = len.try_into().map_err(|_| invalid_zip())?;
@@ -229,22 +268,48 @@ fn read_central_directory(
     entries.try_reserve_exact(len)?;
 
     reader.seek(io::SeekFrom::Start(offset))?;
-
     let mut buf = Vec::new();
     for _ in 0..len {
         entries.push(read_central_header(reader, &mut buf)?);
     }
 
-    // Check that the local headers match the central ones and fill the missing data offset
-    for entry in &mut entries {
-        reader.seek(io::SeekFrom::Start(entry.header_offset))?;
-        let local_entry = read_local_header(reader, &mut buf)?;
+    // Check that the local headers match the central ones and fill the missing data offset.
+    // We expect local entries to be in order. Although this is not compulsory by the spec (but at
+    // this point you have probably understood that very few things are), this is the "normal"
+    // behavior, and deviations from it are only used by malicious attempts to do confusion attacks
+    // or zip bombs.
+    let first_offset = entries.first().unwrap().header_offset;
+    reader.seek(io::SeekFrom::Start(first_offset))?;
 
-        if entry.compression_method != local_entry.compression_method {
+    let mut reader = crate::utils::Counter {
+        inner: reader,
+        amt: first_offset,
+    };
+
+    for entry in &mut entries {
+        let mut local_entry = read_local_header(&mut reader, &mut buf)?;
+        entry.data_offset = reader.amt;
+
+        // Skip the compressed file
+        reader.advance(entry.compressed_size as _)?;
+
+        // Read the data descriptor if needed
+        read_data_descriptor(&mut reader, &mut local_entry)?;
+
+        // Now we can check that both header are consistent
+        if entry.compression_method != local_entry.compression_method
+            || entry.name != local_entry.name
+            || entry.compressed_size != local_entry.compressed_size
+            || entry.uncompressed_size != local_entry.uncompressed_size
+            || entry.crc32 != local_entry.crc32
+            || entry.flags != local_entry.flags
+        {
             return Err(invalid_entry());
         }
+    }
 
-        entry.data_offset = entry.header_offset + local_entry.data_offset;
+    if reader.amt != offset {
+        return Err(invalid_zip());
     }
 
     Ok(entries)

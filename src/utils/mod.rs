@@ -51,6 +51,16 @@ impl<T> Counter<T> {
     pub const fn new(inner: T) -> Self {
         Self { amt: 0, inner }
     }
+
+    pub(crate) fn advance(&mut self, amt: u64) -> io::Result<()>
+    where
+        T: io::Seek,
+    {
+        let Ok(offset) = amt.try_into() else { todo!() };
+
+        self.amt = self.amt.checked_add(amt).unwrap();
+        self.inner.seek_relative(offset)
+    }
 }
 
 impl<R: io::Read> io::Read for Counter<R> {
