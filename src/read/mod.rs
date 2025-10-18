@@ -490,8 +490,8 @@ pub struct ZipFile<'a, R> {
     reader: &'a mut R,
 }
 
-impl<R: BufRead + Seek> ZipFile<'_, R> {
-    pub fn metadata(&self) -> &Metadata {
+impl<'a, R: BufRead + Seek> ZipFile<'a, R> {
+    pub fn metadata(&self) -> &'a Metadata {
         self.metadata
     }
 
