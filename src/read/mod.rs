@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     CompressionMethod, Decompressor, types,
-    utils::{Crc32Checker, Timestamp, cp437},
+    utils::{Crc32Checker, LengthChecker, Timestamp, cp437},
 };
 
 mod extra_field;
@@ -361,15 +361,12 @@ impl Metadata {
 
     pub fn read<R: BufRead + Seek>(&self, reader: R) -> io::Result<impl Read + use<R>> {
         let reader = Decompressor::new(self.read_raw(reader)?, self.compression_method)?;
-        Ok(self.read_with_decompressor(reader))
+        Ok(self.content_checker(reader))
     }
 
-    pub fn read_with_decompressor<R: Read>(&self, reader: R) -> impl Read + use<R> {
+    pub fn content_checker<R: Read>(&self, reader: R) -> impl Read + use<R> {
         Crc32Checker::new(
-            LengthChecker {
-                reader,
-                expected: self.uncompressed_size,
-            },
+            LengthChecker::new(reader, self.uncompressed_size),
             self.crc32,
         )
     }
@@ -501,66 +498,6 @@ impl<'a, R: BufRead + Seek> ZipFile<'a, R> {
 
     pub fn read(&mut self) -> io::Result<impl Read + '_> {
         self.metadata.read(&mut *self.reader)
-    }
-}
-
-#[cold]
-fn bad_length() -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, "unexpected file length")
-}
-
-pub struct LengthChecker<R> {
-    expected: u64,
-    reader: R,
-}
-
-impl<R: Read> Read for LengthChecker<R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let n = self.reader.read(buf)?;
-        if n == 0 && self.expected != 0 {
-            return Err(bad_length());
-        }
-        self.expected = self.expected.checked_sub(n as u64).ok_or_else(bad_length)?;
-        Ok(n)
-    }
-
-    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
-        let size = self
-            .expected
-            .try_into()
-            .map_err(|_| io::ErrorKind::OutOfMemory)?;
-        buf.try_reserve(size)?;
-
-        let initial_len = buf.len();
-        buf.extend((0..size).map(|_| 0));
-        self.read_exact(&mut buf[initial_len..])?;
-
-        // Check that we really are at EOF
-        self.read(&mut [0])?;
-
-        Ok(size)
-    }
-
-    fn read_to_string(&mut self, buf: &mut String) -> io::Result<usize> {
-        let size = self
-            .expected
-            .try_into()
-            .map_err(|_| io::ErrorKind::OutOfMemory)?;
-        buf.try_reserve(size)?;
-
-        // Forward to the default implementation of `read_to_string`
-
-        struct Reader<R>(R);
-        impl<R: Read> Read for Reader<R> {
-            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-                self.0.read(buf)
-            }
-            fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
-                self.0.read_to_end(buf)
-            }
-        }
-
-        Reader(self).read_to_string(buf)
     }
 }
 

@@ -92,3 +92,70 @@ impl<W: io::Write> io::Write for Counter<W> {
         self.inner.flush()
     }
 }
+
+#[cold]
+fn bad_length() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, "unexpected file length")
+}
+
+pub(crate) struct LengthChecker<R> {
+    expected: u64,
+    reader: R,
+}
+
+impl<R> LengthChecker<R> {
+    #[inline]
+    pub fn new(reader: R, expected: u64) -> Self {
+        Self { expected, reader }
+    }
+}
+
+impl<R: io::Read> io::Read for LengthChecker<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.reader.read(buf)?;
+        if n == 0 && self.expected != 0 {
+            return Err(bad_length());
+        }
+        self.expected = self.expected.checked_sub(n as u64).ok_or_else(bad_length)?;
+        Ok(n)
+    }
+
+    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
+        let size = self
+            .expected
+            .try_into()
+            .map_err(|_| io::ErrorKind::OutOfMemory)?;
+        buf.try_reserve(size)?;
+
+        let initial_len = buf.len();
+        buf.extend((0..size).map(|_| 0));
+        self.read_exact(&mut buf[initial_len..])?;
+
+        // Check that we really are at EOF
+        self.read(&mut [0])?;
+
+        Ok(size)
+    }
+
+    fn read_to_string(&mut self, buf: &mut String) -> io::Result<usize> {
+        let size = self
+            .expected
+            .try_into()
+            .map_err(|_| io::ErrorKind::OutOfMemory)?;
+        buf.try_reserve(size)?;
+
+        // Forward to the default implementation of `read_to_string`
+
+        struct Reader<R>(R);
+        impl<R: io::Read> io::Read for Reader<R> {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                self.0.read(buf)
+            }
+            fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
+                self.0.read_to_end(buf)
+            }
+        }
+
+        Reader(self).read_to_string(buf)
+    }
+}
