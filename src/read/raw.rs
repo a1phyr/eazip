@@ -327,5 +327,13 @@ pub(crate) fn read_archive(reader: &mut dyn ReadSeek) -> io::Result<(Vec<Metadat
 
     let entries = read_central_directory(reader, central_dir.offset, central_dir.entries)?;
 
+    let mut names = std::collections::HashSet::with_capacity(entries.len());
+    for entry in &entries {
+        let name = entry.name.strip_suffix('/').unwrap_or(&entry.name);
+        if !names.insert(name) {
+            return Err(super::invalid("duplicated name in archive"));
+        }
+    }
+
     Ok((entries, comment))
 }
