@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::HashMap,
     io::{self, BufRead, Read, Seek},
 };
@@ -120,17 +121,38 @@ impl FileType {
     }
 }
 
-fn check_string(raw: &[u8], is_unicode: bool) -> Option<(Box<str>, Option<u32>)> {
+fn convert_string(raw: &[u8], is_unicode: bool) -> Option<(Cow<'_, str>, Option<u32>)> {
     Some(if is_unicode {
-        (str::from_utf8(raw).ok()?.into(), None)
+        (Cow::Borrowed(str::from_utf8(raw).ok()?), None)
     } else {
-        let string = cp437::convert(raw);
-        let crc = match string {
-            std::borrow::Cow::Borrowed(_) => None,
-            std::borrow::Cow::Owned(_) => Some(crc32fast::hash(raw)),
-        };
-        (string.into_owned().into_boxed_str(), crc)
+        (cp437::convert(raw), Some(crc32fast::hash(raw)))
     })
+}
+
+fn check_name(name: &str) -> Option<Box<str>> {
+    if name.starts_with('/')
+        || name.contains('\\')
+        || name.contains('\0')
+        || (cfg!(windows) && name.contains(':'))
+    {
+        return None;
+    }
+
+    let mut dst = String::with_capacity(name.len());
+    for part in name.split_inclusive('/') {
+        match part {
+            // Forbid parent parts as they have weird interactions with symlinks
+            "." | ".." | "../" => return None,
+            "/" | "./" => (),
+            _ => dst.push_str(part),
+        }
+    }
+
+    if dst.is_empty() {
+        return None;
+    }
+
+    Some(dst.into_boxed_str())
 }
 
 #[derive(Debug)]
@@ -172,7 +194,8 @@ impl Metadata {
             return None;
         }
 
-        let (name, name_crc) = check_string(file_name, is_unicode)?;
+        let (name, name_crc) = convert_string(file_name, is_unicode)?;
+        let name = check_name(&name)?;
 
         let mut meta = Self {
             crc32: header.crc32.get(),
@@ -219,10 +242,11 @@ impl Metadata {
             return None;
         }
 
-        let (comment, comment_crc) = check_string(comment, is_unicode)?;
-        let (name, name_crc) = check_string(file_name, is_unicode)?;
-        let external_attributes = header.external_attributes.get();
-        let file_type = FileType::test(external_attributes, &name)?;
+        let (comment, comment_crc) = convert_string(comment, is_unicode)?;
+        let comment = comment.into_owned().into_boxed_str();
+        let (name, name_crc) = convert_string(file_name, is_unicode)?;
+        let name = check_name(&name)?;
+        let file_type = FileType::test(header.external_attributes.get(), &name)?;
 
         let mut meta = Self {
             crc32: header.crc32.get(),
@@ -275,20 +299,17 @@ impl Metadata {
                     self.is_zip64 = true;
                 }
                 ExtraField::UnicodeComment(unicode) => {
-                    let crc32 =
-                        comment_crc.unwrap_or_else(|| crc32fast::hash(self.comment.as_bytes()));
-                    if unicode.header_comment_crc32 != crc32 {
+                    if Some(unicode.header_comment_crc32) != comment_crc {
                         return None;
                     }
                     self.comment = unicode.comment.into();
                 }
 
                 ExtraField::UnicodeName(unicode) => {
-                    let crc32 = name_crc.unwrap_or_else(|| crc32fast::hash(self.name.as_bytes()));
-                    if unicode.header_name_crc32 != crc32 {
+                    if Some(unicode.header_name_crc32) != name_crc {
                         return None;
                     }
-                    self.name = unicode.name.into();
+                    self.name = check_name(unicode.name)?;
                 }
 
                 ExtraField::Ntfs(ntfs) => {
@@ -324,23 +345,8 @@ impl Metadata {
         matches!(self.file_type, FileType::Symlink)
     }
 
-    pub fn display_name(&self) -> &str {
+    pub fn name(&self) -> &str {
         &self.name
-    }
-
-    pub fn safe_name(&self) -> Option<&str> {
-        if self.name.starts_with('/')
-            || self.name.contains('\\')
-            || (cfg!(windows) && self.name.contains(':'))
-        {
-            return None;
-        }
-
-        if self.name.split('/').any(|part| part.contains("..")) {
-            return None;
-        }
-
-        Some(&self.name)
     }
 
     pub fn comment(&self) -> &str {
@@ -365,8 +371,7 @@ impl Metadata {
     }
 
     pub fn extract<R: BufRead + Seek>(&self, reader: R, at: &std::path::Path) -> io::Result<()> {
-        let name = self.safe_name().ok_or_else(|| invalid("invalid path"))?;
-        let path = at.join(name);
+        let path = at.join(&*self.name);
         std::fs::create_dir_all(path.parent().unwrap())?;
 
         match self.file_type {
@@ -383,7 +388,7 @@ impl Metadata {
             }
             FileType::Symlink => {
                 let target = io::read_to_string(self.read(reader)?)?;
-                if !validate_symlink(name, &target) {
+                if !validate_symlink(&self.name, &target) {
                     return Err(invalid("invalid symlink target"));
                 }
 
@@ -431,7 +436,7 @@ impl<R: BufRead + Seek> ZipArchive<R> {
             .entries()
             .iter()
             .enumerate()
-            .map(|(i, meta)| (meta.display_name().into(), i))
+            .map(|(i, meta)| (meta.name().into(), i))
             .collect();
 
         Ok(Self {
