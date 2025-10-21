@@ -324,6 +324,8 @@ impl Metadata {
                     self.creation_time = ts.creation_time;
                 }
 
+                ExtraField::Invalid(_, _) => return None,
+
                 _ => (),
             }
         }
