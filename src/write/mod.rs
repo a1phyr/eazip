@@ -51,7 +51,7 @@ impl<W: io::Write> ArchiveWriter<W> {
                 compression_method: options.compression_method,
                 uncompressed_size,
                 crc32,
-                attributes: 0,
+                typ: crate::FileType::File,
             },
         )?;
 
@@ -90,7 +90,7 @@ impl<W: io::Write> ArchiveWriter<W> {
                 compression_method: CompressionMethod::STORE,
                 uncompressed_size: 0,
                 crc32: 0,
-                attributes: (1 << 4) | (4 << 28),
+                typ: crate::FileType::Directory,
             },
         )
     }
@@ -104,7 +104,7 @@ impl<W: io::Write> ArchiveWriter<W> {
                 compression_method: CompressionMethod::STORE,
                 uncompressed_size: target.len() as _,
                 crc32: crc32fast::hash(target.as_bytes()),
-                attributes: (1 << 4) | (4 << 28),
+                typ: crate::FileType::Symlink,
             },
         )
     }

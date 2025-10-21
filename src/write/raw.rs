@@ -1,5 +1,5 @@
 use crate::{
-    CompressionMethod,
+    CompressionMethod, FileType,
     types::{self, Pod},
     utils::Counter,
 };
@@ -42,7 +42,7 @@ pub struct Metadata {
     pub compression_method: CompressionMethod,
     pub uncompressed_size: u64,
     pub crc32: u32,
-    pub attributes: u32,
+    pub typ: FileType,
 }
 
 struct RawMetadata {
@@ -141,7 +141,7 @@ impl RawArchiveWriter {
                     compression_method: options.compression_method,
                     uncompressed_size: 0,
                     crc32: 0,
-                    attributes: 0,
+                    typ: FileType::File,
                 },
             },
         )?;
@@ -224,6 +224,12 @@ impl RawArchiveWriter {
 
         let stream_flag = if meta.is_streaming { 1 << 3 } else { 0 };
 
+        let attributes = match meta.meta.typ {
+            FileType::File => (1 << 5) | (8 << 28),
+            FileType::Directory => (1 << 4) | (4 << 28),
+            FileType::Symlink => (0o777 << 16) | (10 << 28),
+        };
+
         self.central_headers.extend_from_slice(
             types::CentralFileHeader {
                 signature: types::CentralFileHeader::SIGNATURE,
@@ -241,7 +247,7 @@ impl RawArchiveWriter {
                 file_comment_length: types::U16::set(0),
                 disk_number: types::U16::set(0),
                 internal_attributes: types::U16::set(1), // "Binary Data" flag
-                external_attributes: types::U32::set(meta.meta.attributes),
+                external_attributes: types::U32::set(attributes),
                 local_header_offset: types::U32::set(0xffff_ffff),
             }
             .as_bytes(),
@@ -340,7 +346,7 @@ impl<W: Write> RawFileStreamer<'_, W> {
                     compression_method: self.compression_method,
                     uncompressed_size,
                     crc32,
-                    attributes: 0,
+                    typ: FileType::File,
                 },
             },
             self.local_header_offset,
@@ -366,7 +372,7 @@ impl<W: Write + io::Seek> RawFileStreamer<'_, W> {
                 compression_method: self.compression_method,
                 uncompressed_size,
                 crc32,
-                attributes: 0,
+                typ: FileType::File,
             },
         };
 
