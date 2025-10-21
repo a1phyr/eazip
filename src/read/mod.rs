@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     CompressionMethod, Decompressor, types,
-    utils::{Crc32Checker, LengthChecker, Timestamp, cp437},
+    utils::{Crc32Checker, FileType, LengthChecker, Timestamp, cp437},
 };
 
 mod extra_field;
@@ -99,13 +99,6 @@ impl RawArchive {
 
         Ok(())
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FileType {
-    File,
-    Directory,
-    Symlink,
 }
 
 impl FileType {

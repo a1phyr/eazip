@@ -5,6 +5,13 @@ pub use crc32::{Crc32Checker, Crc32Writer};
 
 use std::{fmt, io, time::SystemTime};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileType {
+    File,
+    Directory,
+    Symlink,
+}
+
 #[derive(Clone, Copy)]
 pub struct Timestamp(pub u64);
 
