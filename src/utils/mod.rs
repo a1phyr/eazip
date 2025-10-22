@@ -63,9 +63,13 @@ impl<T> Counter<T> {
     where
         T: io::Seek,
     {
-        let Ok(offset) = amt.try_into() else { todo!() };
+        #[cold]
+        fn out_of_range() -> io::Error {
+            io::Error::new(io::ErrorKind::InvalidInput, "seek out of range")
+        }
 
-        self.amt = self.amt.checked_add(amt).unwrap();
+        let offset = amt.try_into().map_err(|_| out_of_range())?;
+        self.amt = self.amt.checked_add(amt).ok_or_else(out_of_range)?;
         self.inner.seek_relative(offset)
     }
 }
