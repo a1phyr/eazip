@@ -109,13 +109,14 @@ impl FileType {
         let unix_kind = unix_mode >> 12;
 
         let is_file = (dos_attr & (1 << 5)) != 0 || unix_kind == 8;
-        let is_dir = (dos_attr & (1 << 4)) != 0 || unix_kind == 4 || name.ends_with('/');
+        let is_dir = (dos_attr & (1 << 4)) != 0 || unix_kind == 4;
         let is_symlink = unix_kind == 10;
+        let trailing_slash = name.ends_with('/');
 
-        match (is_file, is_dir, is_symlink) {
-            (_, false, false) => Some(FileType::File),
-            (false, true, false) => Some(FileType::Directory),
-            (false, false, true) => Some(FileType::Symlink),
+        match (is_file, is_dir, trailing_slash, is_symlink) {
+            (_, false, false, false) => Some(FileType::File),
+            (false, _, true, false) => Some(FileType::Directory),
+            (false, false, false, true) => Some(FileType::Symlink),
             _ => None,
         }
     }
