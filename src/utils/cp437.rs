@@ -1,11 +1,5 @@
-use std::borrow::Cow;
-
-pub fn convert(data: &[u8]) -> Cow<'_, str> {
-    if data.is_ascii() {
-        Cow::Borrowed(std::str::from_utf8(data).unwrap())
-    } else {
-        data.iter().map(|&b| byte_to_char(b)).collect()
-    }
+pub fn convert(data: &[u8]) -> String {
+    data.iter().map(|&b| byte_to_char(b)).collect()
 }
 
 const fn byte_to_char(b: u8) -> char {

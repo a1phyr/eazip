@@ -122,12 +122,21 @@ impl FileType {
     }
 }
 
-fn convert_string(raw: &[u8], is_unicode: bool) -> Option<(Cow<'_, str>, Option<u32>)> {
-    Some(if is_unicode {
-        (Cow::Borrowed(str::from_utf8(raw).ok()?), None)
+fn convert_string(raw: &[u8], force_unicode: bool) -> Option<(Cow<'_, str>, Option<u32>)> {
+    // MacOS stores the file name as UTF8, but does not use the unicode flag,
+    // and everyone seems fine with that, so if we meet UTF8 we'll just pretend
+    // that everything is fine.
+    if let Ok(name) = str::from_utf8(raw) {
+        return Some((Cow::Borrowed(name), None));
+    }
+
+    // If we didn't find UTF8 and it wasn't expected, handle it as CP437.
+    if force_unicode {
+        None
     } else {
-        (cp437::convert(raw), Some(crc32fast::hash(raw)))
-    })
+        let name = cp437::convert(raw);
+        Some((Cow::Owned(name), Some(crc32fast::hash(raw))))
+    }
 }
 
 fn check_name(name: &str) -> Option<Box<str>> {
