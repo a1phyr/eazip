@@ -152,16 +152,26 @@ enum CompressorImpl<W: io::Write> {
 }
 
 impl<W: io::Write> Compressor<W> {
-    pub fn new(writer: W, method: CompressionMethod, _level: Option<i32>) -> io::Result<Self> {
+    pub fn new(writer: W, method: CompressionMethod, level: Option<i32>) -> io::Result<Self> {
+        // Avoid the "unused" warning if not using the default features
+        let _ = level;
+
         let inner = match method {
             CompressionMethod::STORE => CompressorImpl::Store(writer),
             #[cfg(feature = "deflate")]
             CompressionMethod::DEFLATE => {
-                let level = flate2::Compression::default();
+                let level = match level {
+                    Some(level) => flate2::Compression::new(level as _),
+                    None => flate2::Compression::default(),
+                };
+
                 CompressorImpl::Deflate(flate2::write::DeflateEncoder::new(writer, level))
             }
             #[cfg(feature = "zstd")]
-            CompressionMethod::ZSTD => CompressorImpl::Zstd(zstd::Encoder::new(writer, 0)?),
+            CompressionMethod::ZSTD => {
+                let level = level.unwrap_or(0);
+                CompressorImpl::Zstd(zstd::Encoder::new(writer, level)?)
+            }
             _ => return Err(unsupported_method(method)),
         };
 
