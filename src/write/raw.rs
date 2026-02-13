@@ -87,6 +87,7 @@ impl RawArchiveWriter {
 
         writer.seek(io::SeekFrom::Start(pos))?;
         self.state = State::Default;
+        self.position = pos;
 
         Ok(())
     }
@@ -351,38 +352,6 @@ impl<W: Write> RawFileStreamer<'_, W> {
             },
             self.local_header_offset,
         )?;
-
-        self.raw.state = State::Default;
-
-        Ok(())
-    }
-}
-
-impl<W: Write + io::Seek> RawFileStreamer<'_, W> {
-    pub fn finish_seekable(self, uncompressed_size: u64, crc32: u32) -> io::Result<()> {
-        let compressed_size = self.writer.amt - self.started_at;
-        self.raw.position += self.writer.amt;
-
-        let mut writer = self.writer.inner;
-
-        let meta = RawMetadata {
-            is_streaming: false,
-            compressed_size,
-            meta: Metadata {
-                compression_method: self.compression_method,
-                uncompressed_size,
-                crc32,
-                typ: FileType::File,
-            },
-        };
-
-        writer.seek(std::io::SeekFrom::Start(self.local_header_offset))?;
-        self.raw
-            .write_local_header(&mut writer, &self.file_name, &meta)?;
-        writer.seek(std::io::SeekFrom::Start(self.raw.position))?;
-
-        self.raw
-            .push_central_header(&self.file_name, &meta, self.local_header_offset)?;
 
         self.raw.state = State::Default;
 

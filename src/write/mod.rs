@@ -150,14 +150,3 @@ impl<W: io::Write> FileStreamer<'_, W> {
         raw_writer.finish(uncompressed_size, crc32)
     }
 }
-
-impl<W: io::Write + io::Seek> FileStreamer<'_, W> {
-    pub fn finish_seekable(self) -> io::Result<()> {
-        let uncompressed_size = self.writer.amt;
-        let crc32 = self.writer.inner.result();
-
-        let raw_writer = self.writer.inner.into_inner().finish()?;
-
-        raw_writer.finish_seekable(uncompressed_size, crc32)
-    }
-}
