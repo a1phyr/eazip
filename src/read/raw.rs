@@ -217,7 +217,7 @@ fn read_central_header(reader: &mut dyn ReadSeek, buf: &mut Vec<u8>) -> io::Resu
         buf,
     )?;
 
-    Metadata::from_central_header(header, &file_name, &extra_fields, &comment)
+    Metadata::from_central_header(header, file_name, extra_fields, comment)
         .ok_or_else(invalid_entry)
 }
 

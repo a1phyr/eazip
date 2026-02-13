@@ -2,7 +2,10 @@
 
 use std::fmt;
 
-pub unsafe trait Pod: 'static {
+/// # Safety
+///
+/// Just like `bytemuck::Pod`
+pub(crate) unsafe trait Pod: 'static {
     fn zeroed() -> Self
     where
         Self: Sized,
