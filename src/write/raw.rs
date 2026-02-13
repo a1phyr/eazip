@@ -4,7 +4,6 @@ use crate::{
     utils,
 };
 use std::{
-    collections::HashSet,
     fmt,
     io::{self, Write},
 };
@@ -108,10 +107,15 @@ enum State {
     Writing(u64),
 }
 
+#[inline]
+fn get_name<'a>(central_headers: &'a [u8]) -> impl Fn(&(usize, usize)) -> &'a [u8] {
+    |&(start, end)| &central_headers[start..end]
+}
+
 #[derive(Default)]
 pub struct RawArchiveWriter {
     state: State,
-    entries: HashSet<Box<str>>,
+    entries: utils::NameTable<(usize, usize)>,
     central_headers: Vec<u8>,
     position: u64,
 }
@@ -120,7 +124,6 @@ impl fmt::Debug for RawArchiveWriter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RawArchiveWriter")
             .field("state", &self.state)
-            .field("entries", &self.entries)
             .field("position", &self.position)
             .finish()
     }
@@ -170,8 +173,13 @@ impl RawArchiveWriter {
         }
 
         let name = utils::validate_name(name).ok_or_else(|| invalid_name("invalid file name"))?;
+        let stripped_name = name.strip_suffix('/').unwrap_or(&name);
 
-        if self.entries.contains(&name) {
+        let duplicated = self
+            .entries
+            .get(stripped_name.as_bytes(), get_name(&self.central_headers))
+            .is_some();
+        if duplicated {
             return Err(invalid_name("duplicated file name"));
         }
 
@@ -281,6 +289,7 @@ impl RawArchiveWriter {
         Ok(())
     }
 
+    #[allow(clippy::boxed_local)]
     fn push_central_header(
         &mut self,
         name: Box<str>,
@@ -294,7 +303,8 @@ impl RawArchiveWriter {
                 + size_of::<ExtendedTimestamp>()
                 + name.len(),
         )?;
-        self.entries.try_reserve(1)?;
+        self.entries
+            .try_reserve(1, get_name(&self.central_headers))?;
 
         debug_assert!(name.len() <= u16::MAX as usize);
 
@@ -340,11 +350,15 @@ impl RawArchiveWriter {
             .as_bytes(),
         );
 
+        let name_start = self.central_headers.len();
+        let name_end = name_start + name.len() - name.ends_with('/') as usize;
+
         self.central_headers.extend_from_slice(name.as_bytes());
         self.central_headers.extend_from_slice(zip64.as_bytes());
         self.central_headers.extend_from_slice(time);
 
-        self.entries.insert(name);
+        self.entries
+            .insert((name_start, name_end), get_name(&self.central_headers));
 
         Ok(())
     }

@@ -140,6 +140,7 @@ fn write_invalid_names() {
     archive
         .add_file("./duplicated", std::io::empty(), &options)
         .unwrap_err();
+    archive.add_directory("duplicated/").unwrap_err();
 
     archive
         .add_file("/absolute", std::io::empty(), &options)

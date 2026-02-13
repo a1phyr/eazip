@@ -289,6 +289,7 @@ impl<R: io::Read> io::Read for LengthChecker<R> {
     }
 }
 
+#[derive(Default)]
 pub(crate) struct NameTable<T> {
     table: HashTable<T>,
     hasher: RandomState,
@@ -300,6 +301,22 @@ impl<T> NameTable<T> {
             table: HashTable::with_capacity(cap),
             hasher: RandomState::new(),
         }
+    }
+
+    #[inline]
+    pub fn try_reserve<'a>(
+        &mut self,
+        cap: usize,
+        f: impl Fn(&T) -> &'a [u8],
+    ) -> Result<(), io::ErrorKind> {
+        self.table
+            .try_reserve(cap, |x| self.hasher.hash_one(f(x)))
+            .map_err(|_| io::ErrorKind::OutOfMemory)
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.table.len()
     }
 
     pub fn get<'a>(&self, name: &[u8], f: impl Fn(&T) -> &'a [u8]) -> Option<&T> {
