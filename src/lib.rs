@@ -8,5 +8,6 @@ mod utils;
 pub mod write;
 
 pub use compression::{CompressionMethod, Compressor, Decompressor};
-pub use read::ZipArchive;
+pub use read::Archive;
 pub use utils::{FileType, Timestamp};
+pub use write::ArchiveWriter;

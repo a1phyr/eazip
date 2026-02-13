@@ -423,13 +423,13 @@ impl Metadata {
     }
 }
 
-pub struct ZipArchive<R> {
+pub struct Archive<R> {
     inner: RawArchive,
     names: HashMap<Box<str>, usize>,
     reader: R,
 }
 
-impl ZipArchive<io::BufReader<std::fs::File>> {
+impl Archive<io::BufReader<std::fs::File>> {
     #[inline]
     pub fn open(path: impl AsRef<std::path::Path>) -> io::Result<Self> {
         Self::_open(path.as_ref())
@@ -440,7 +440,7 @@ impl ZipArchive<io::BufReader<std::fs::File>> {
     }
 }
 
-impl<R: BufRead + Seek> ZipArchive<R> {
+impl<R: BufRead + Seek> Archive<R> {
     pub fn new(mut reader: R) -> io::Result<Self> {
         let inner = RawArchive::new(&mut reader)?;
 
@@ -462,15 +462,15 @@ impl<R: BufRead + Seek> ZipArchive<R> {
         &self.inner.entries
     }
 
-    pub fn get_by_index(&mut self, index: usize) -> Option<ZipFile<'_, R>> {
+    pub fn get_by_index(&mut self, index: usize) -> Option<File<'_, R>> {
         let metadata = self.inner.entries().get(index)?;
-        Some(ZipFile {
+        Some(File {
             metadata,
             reader: &mut self.reader,
         })
     }
 
-    pub fn get_by_name(&mut self, name: &str) -> Option<ZipFile<'_, R>> {
+    pub fn get_by_name(&mut self, name: &str) -> Option<File<'_, R>> {
         let index = *self.names.get(name)?;
         self.get_by_index(index)
     }
@@ -492,12 +492,12 @@ impl<R: BufRead + Seek> ZipArchive<R> {
     }
 }
 
-pub struct ZipFile<'a, R> {
+pub struct File<'a, R> {
     metadata: &'a Metadata,
     reader: &'a mut R,
 }
 
-impl<'a, R: BufRead + Seek> ZipFile<'a, R> {
+impl<'a, R: BufRead + Seek> File<'a, R> {
     pub fn metadata(&self) -> &'a Metadata {
         self.metadata
     }
