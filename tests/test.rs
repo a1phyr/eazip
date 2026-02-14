@@ -92,6 +92,11 @@ fn windows_7z() {
 }
 
 #[test]
-fn windows() {
+fn windows10() {
     test_one("tests/windows10.zip");
+}
+
+#[test]
+fn windows11() {
+    test_one("tests/windows11.zip");
 }
