@@ -1,0 +1,36 @@
+on: [push, pull_request]
+
+name: CI
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: ${{ matrix.target }}
+    strategy:
+      matrix:
+        rust:
+          - stable
+          - 1.87
+        target:
+          - ubuntu-latest
+          - windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain add ${{ matrix.rust }}
+      - run: cargo +${{ matrix.rust }} test
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo clippy --no-default-features --features std -- -D warnings
+      - run: cargo clippy --all-features -- -D warnings
+
+  fmt:
+    name: Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo fmt -- --check
