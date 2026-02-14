@@ -1,3 +1,5 @@
+//! Utilities to read an archive.
+
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -5,8 +7,8 @@ use std::{
 };
 
 use crate::{
-    CompressionMethod, Decompressor, types,
-    utils::{Crc32Checker, FileType, LengthChecker, Timestamp, cp437},
+    CompressionMethod, Decompressor, FileType, types,
+    utils::{Crc32Checker, LengthChecker, Timestamp, cp437},
 };
 
 mod extra_field;
@@ -42,25 +44,37 @@ fn validate_symlink(name: &str, target: &str) -> bool {
 trait ReadSeek: Read + Seek {}
 impl<R: Read + Seek> ReadSeek for R {}
 
+trait BufReadSeek: BufRead + Seek {}
+impl<R: BufRead + Seek> BufReadSeek for R {}
+
+/// An open ZIP archive without a reader
 pub struct RawArchive {
     entries: Vec<Metadata>,
     comment: Box<[u8]>,
 }
 
 impl RawArchive {
+    /// Creates a `RawArchive` from a reader.
+    ///
+    /// The same reader should be used for other methods.
     pub fn new<R: Read + Seek>(reader: &mut R) -> io::Result<Self> {
         let (entries, comment) = raw::read_archive(reader)?;
         Ok(Self { entries, comment })
     }
 
+    /// Gets the list of entries in this archive.
     pub fn entries(&self) -> &[Metadata] {
         &self.entries
     }
 
+    /// Gets the comment of the archive.
     pub fn comment(&self) -> &[u8] {
         &self.comment
     }
 
+    /// Extracts the archive to the given directory.
+    ///
+    /// The directory will be created if needed, but *not* its parent.
     pub fn extract<R: BufRead + Seek>(
         &self,
         reader: &mut R,
@@ -73,12 +87,18 @@ impl RawArchive {
         };
 
         for entry in &self.entries {
-            entry.extract(&mut *reader, at)?;
+            entry.extract(reader, at)?;
         }
 
         Ok(())
     }
 
+    /// Extracts the archive to the given directory in parallel.
+    ///
+    /// The directory will be created if needed, but *not* its parent.
+    ///
+    /// The reader should implement [`sync_file::ReadAt`], like [`io::Cursor`]
+    /// or [`sync_file::RandomAccessFile`].
     #[cfg(feature = "parallel")]
     pub fn parallel_extract<R: sync_file::ReadAt + sync_file::Size + Sync>(
         &self,
@@ -165,6 +185,7 @@ fn check_name(name: &str) -> Option<Box<str>> {
     Some(dst.into_boxed_str())
 }
 
+/// The metadata of a ZIP entry.
 #[derive(Debug)]
 pub struct Metadata {
     is_encrypted: bool,
@@ -343,38 +364,40 @@ impl Metadata {
         Some(())
     }
 
+    /// Returns `true` if this file is encrypted.
     pub fn is_encrypted(&self) -> bool {
         self.is_encrypted
     }
 
-    #[inline]
-    pub fn is_dir(&self) -> bool {
-        matches!(self.file_type, FileType::Directory)
-    }
-
-    #[inline]
-    pub fn is_symlink(&self) -> bool {
-        matches!(self.file_type, FileType::Symlink)
-    }
-
+    /// Gets the name of this entry.
     pub fn name(&self) -> &str {
         &self.name
     }
 
+    /// Gets the comment of this entry.
     pub fn comment(&self) -> &str {
         &self.comment
     }
 
-    pub fn read_raw<R: Read + Seek>(&self, mut reader: R) -> io::Result<io::Take<R>> {
-        reader.seek(io::SeekFrom::Start(self.data_offset))?;
-        Ok(reader.take(self.compressed_size))
-    }
-
+    /// Returns a reader with the content of the file.
+    ///
+    /// Unsupported compression methods will return an error.
     pub fn read<R: BufRead + Seek>(&self, reader: R) -> io::Result<impl Read + use<R>> {
         let reader = Decompressor::new(self.read_raw(reader)?, self.compression_method)?;
         Ok(self.content_checker(reader))
     }
 
+    /// Returns a reader with the raw, uncompressed, content of the file.
+    ///
+    /// The uncompressed content should be checked with `content_checker`.
+    pub fn read_raw<R: Read + Seek>(&self, mut reader: R) -> io::Result<io::Take<R>> {
+        reader.seek(io::SeekFrom::Start(self.data_offset))?;
+        Ok(reader.take(self.compressed_size))
+    }
+
+    /// Wraps a reader to check that its content matches this metadata.
+    ///
+    /// It is particularly  useful in combinaison of `read_raw`.
     pub fn content_checker<R: Read>(&self, reader: R) -> impl Read + use<R> {
         Crc32Checker::new(
             LengthChecker::new(reader, self.uncompressed_size),
@@ -382,7 +405,21 @@ impl Metadata {
         )
     }
 
-    pub fn extract<R: BufRead + Seek>(&self, reader: R, at: &std::path::Path) -> io::Result<()> {
+    /// Extracts this entry as if the root of the archive was at `root`.
+    #[inline]
+    pub fn extract<R: BufRead + Seek>(
+        &self,
+        reader: &mut R,
+        root: impl AsRef<std::path::Path>,
+    ) -> io::Result<()> {
+        self._extract(reader, root.as_ref())
+    }
+
+    fn _extract(&self, reader: &mut dyn BufReadSeek, at: &std::path::Path) -> io::Result<()> {
+        if !std::fs::metadata(at)?.is_dir() {
+            return Err(io::Error::from(io::ErrorKind::NotFound));
+        }
+
         let path = at.join(&*self.name);
         std::fs::create_dir_all(path.parent().unwrap())?;
 
@@ -423,6 +460,28 @@ impl Metadata {
     }
 }
 
+/// An open ZIP archive.
+///
+/// This type owns the reader. If you need something more flexible, use
+/// [`RawArchive`] instead.
+///
+/// # Example
+///
+/// Print the name and content of each file in the archive:
+///
+/// ```no_run
+/// let mut archive = eazip::Archive::open("example.zip")?;
+///
+/// for i in 0..archive.entries().len() {
+///     let mut entry = archive.get_by_index(i).unwrap();
+///     let name = entry.metadata().name();
+///     let content = std::io::read_to_string(entry.read()?)?;
+///
+///     println!("{name}: {content}");
+/// }
+///
+/// # Ok::<(), std::io::Error>(())
+/// ```
 pub struct Archive<R> {
     inner: RawArchive,
     names: HashMap<Box<str>, usize>,
@@ -430,6 +489,7 @@ pub struct Archive<R> {
 }
 
 impl Archive<io::BufReader<std::fs::File>> {
+    /// Opens the given file as a ZIP archive.
     #[inline]
     pub fn open(path: impl AsRef<std::path::Path>) -> io::Result<Self> {
         Self::_open(path.as_ref())
@@ -441,6 +501,7 @@ impl Archive<io::BufReader<std::fs::File>> {
 }
 
 impl<R: BufRead + Seek> Archive<R> {
+    /// Opens a ZIP archive from a reader.
     pub fn new(mut reader: R) -> io::Result<Self> {
         let inner = RawArchive::new(&mut reader)?;
 
@@ -458,10 +519,12 @@ impl<R: BufRead + Seek> Archive<R> {
         })
     }
 
+    /// Gets the list of entries in the archive.
     pub fn entries(&self) -> &[Metadata] {
         &self.inner.entries
     }
 
+    /// Gets a file by its index.
     pub fn get_by_index(&mut self, index: usize) -> Option<File<'_, R>> {
         let metadata = self.inner.entries().get(index)?;
         Some(File {
@@ -470,19 +533,30 @@ impl<R: BufRead + Seek> Archive<R> {
         })
     }
 
+    /// Gets a file by its name.
     pub fn get_by_name(&mut self, name: &str) -> Option<File<'_, R>> {
         let index = *self.names.get(name)?;
         self.get_by_index(index)
     }
 
+    /// Gets the comment of the archive.
     pub fn commment(&self) -> &[u8] {
         &self.inner.comment
     }
 
+    /// Extracts the archive to the given directory.
+    ///
+    /// The directory will be created if needed, but *not* its parent.
     pub fn extract(&mut self, at: impl AsRef<std::path::Path>) -> io::Result<()> {
         self.inner.extract(&mut self.reader, at.as_ref())
     }
 
+    /// Extracts the archive to the given directory in parallel.
+    ///
+    /// The directory will be created if needed, but *not* its parent.
+    ///
+    /// The reader should implement [`sync_file::ReadAt`], like [`io::Cursor`]
+    /// or [`sync_file::SyncFile`].
     #[cfg(feature = "parallel")]
     pub fn parallel_extract(&self, at: impl AsRef<std::path::Path>) -> io::Result<()>
     where
@@ -490,24 +564,37 @@ impl<R: BufRead + Seek> Archive<R> {
     {
         self.inner.parallel_extract(&self.reader, at.as_ref())
     }
+
+    /// Gets a mutable reference to the underlying reader.
+    pub fn get_mut(&mut self) -> &mut R {
+        &mut self.reader
+    }
 }
 
+/// A file in a ZIP archive.
 pub struct File<'a, R> {
     metadata: &'a Metadata,
     reader: &'a mut R,
 }
 
 impl<'a, R: BufRead + Seek> File<'a, R> {
+    /// Gets the metadata of the file.
     pub fn metadata(&self) -> &'a Metadata {
         self.metadata
     }
 
-    pub fn read_raw(&mut self) -> io::Result<io::Take<&mut R>> {
-        self.metadata.read_raw(self.reader)
-    }
-
+    /// Returns a reader with the content of the file.
+    ///
+    /// Unsupported compression methods will return an error.
     pub fn read(&mut self) -> io::Result<impl Read + '_> {
         self.metadata.read(&mut *self.reader)
+    }
+
+    /// Returns a reader with the raw, compressed, content of the file.
+    ///
+    /// The uncompressed content should be checked with [`Metadata::content_checker`].
+    pub fn read_raw(&mut self) -> io::Result<io::Take<&mut R>> {
+        self.metadata.read_raw(self.reader)
     }
 }
 

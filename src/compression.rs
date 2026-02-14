@@ -1,5 +1,8 @@
 use std::{fmt, io};
 
+/// A compression method used in an archive.
+///
+/// The field is the value as defined by the ZIP standard.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct CompressionMethod(pub u16);
 
@@ -35,6 +38,20 @@ impl Default for CompressionMethod {
 }
 
 impl CompressionMethod {
+    /// The compressions methods natively supported by this crate.
+    ///
+    /// Exact value varies depending the enabled features.
+    pub const SUPPORTED: &[CompressionMethod] = &[
+        Self::STORE,
+        #[cfg(feature = "deflate")]
+        Self::DEFLATE,
+        #[cfg(feature = "zstd")]
+        Self::ZSTD,
+    ];
+}
+
+impl CompressionMethod {
+    /// No compression
     pub const STORE: Self = Self(0);
     pub const DEFLATE: Self = Self(8);
     pub const DEFLATE64: Self = Self(9);
@@ -44,14 +61,6 @@ impl CompressionMethod {
     pub const ZSTD: Self = Self(93);
     pub const XZ: Self = Self(95);
     pub const AES: Self = Self(99);
-
-    pub const SUPPORTED: &[CompressionMethod] = &[
-        Self::STORE,
-        #[cfg(feature = "deflate")]
-        Self::DEFLATE,
-        #[cfg(feature = "zstd")]
-        Self::ZSTD,
-    ];
 }
 
 #[cold]
@@ -62,6 +71,7 @@ fn unsupported_method(method: CompressionMethod) -> io::Error {
     )
 }
 
+/// An adapter to decompress a stream.
 pub struct Decompressor<R>(DecompressorImpl<R>);
 
 enum DecompressorImpl<R> {
@@ -73,6 +83,9 @@ enum DecompressorImpl<R> {
 }
 
 impl<R: io::BufRead> Decompressor<R> {
+    /// Creates a new `Decompressor`.
+    ///
+    /// Compression methods unsupported by this crate will cause an error.
     pub fn new(reader: R, method: CompressionMethod) -> io::Result<Self> {
         let inner = match method {
             CompressionMethod::STORE => DecompressorImpl::Store(reader),
@@ -88,6 +101,7 @@ impl<R: io::BufRead> Decompressor<R> {
         Ok(Self(inner))
     }
 
+    /// Returns the compression method used by this decompressor
     pub fn compression_method(&self) -> CompressionMethod {
         match self.0 {
             DecompressorImpl::Store(_) => CompressionMethod::STORE,
@@ -98,6 +112,9 @@ impl<R: io::BufRead> Decompressor<R> {
         }
     }
 
+    /// Gets a mutable reference to the underlying reader.
+    ///
+    /// It is inadvisable to directly read from the underlying reader.
     pub fn get_mut(&mut self) -> &mut R {
         match &mut self.0 {
             DecompressorImpl::Store(r) => r,
@@ -141,6 +158,7 @@ impl<R: io::BufRead> io::Read for Decompressor<R> {
     }
 }
 
+/// An adapter to compress a stream.
 pub struct Compressor<W: io::Write>(CompressorImpl<W>);
 
 enum CompressorImpl<W: io::Write> {
@@ -152,6 +170,12 @@ enum CompressorImpl<W: io::Write> {
 }
 
 impl<W: io::Write> Compressor<W> {
+    /// Creates a new `Compressor`.
+    ///
+    /// The `level` parameter signification depends on the method used. `None`
+    /// always means "default level" and is always supported.
+    ///
+    /// Compression methods unsupported by this crate will cause an error.
     pub fn new(writer: W, method: CompressionMethod, level: Option<i32>) -> io::Result<Self> {
         // Avoid the "unused" warning if not using the default features
         let _ = level;
@@ -178,6 +202,7 @@ impl<W: io::Write> Compressor<W> {
         Ok(Self(inner))
     }
 
+    /// Returns the compression method used by this compressor
     pub fn compression_method(&self) -> CompressionMethod {
         match self.0 {
             CompressorImpl::Store(_) => CompressionMethod::STORE,
@@ -188,6 +213,9 @@ impl<W: io::Write> Compressor<W> {
         }
     }
 
+    /// Gets a mutable reference to the underlying writer.
+    ///
+    /// It is inadvisable to directly write to the underlying writer.
     pub fn get_mut(&mut self) -> &mut W {
         match &mut self.0 {
             CompressorImpl::Store(w) => w,
@@ -198,6 +226,9 @@ impl<W: io::Write> Compressor<W> {
         }
     }
 
+    /// Attempts to finish the stream.
+    ///
+    /// You must finish the stream when you're done writing.
     pub fn do_finish(&mut self) -> io::Result<()> {
         match &mut self.0 {
             CompressorImpl::Store(_) => Ok(()),
@@ -208,6 +239,9 @@ impl<W: io::Write> Compressor<W> {
         }
     }
 
+    /// Finishes the stream and get the writer back.
+    ///
+    /// You must finish the stream when you're done writing.
     pub fn finish(self) -> io::Result<W> {
         match self.0 {
             CompressorImpl::Store(w) => Ok(w),

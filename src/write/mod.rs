@@ -1,3 +1,5 @@
+//! Utilities to write an archive.
+
 use crate::{
     CompressionMethod,
     compression::Compressor,
@@ -7,20 +9,71 @@ use std::io;
 
 mod raw;
 
+/// The options used when adding a file to an archive.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 pub struct FileOptions {
+    /// The compression method.
     pub compression_method: CompressionMethod,
+    /// The compression level.
     pub level: Option<i32>,
 }
 
+/// Wraps a writer to create a ZIP archive.
+///
+/// You need to call `self.finish()` when done.
+///
+/// This type only does minimal validation on the file names for now, so untrusted
+/// input may produce dangerous ZIP archives. This will be improved in a future
+/// version.
+///
+/// # Example
+///
+/// ```no_run
+/// use std::io::prelude::*;
+///
+/// let mut archive = eazip::ArchiveWriter::create("example.zip")?;
+/// let options = eazip::write::FileOptions::default();
+///
+/// // Add a file
+/// archive.add_file("hello.txt", b"hello\n".as_slice(), &options)?;
+///
+/// // Add a directory
+/// archive.add_directory("dir/")?;
+///
+/// // Stream a file
+/// let mut writer = archive.stream_file("dir/streaming.txt", &options)?;
+/// writer.write_all(b"some data\n")?;
+/// writer.finish()?;
+///
+/// // Finish writing the archive
+/// archive.finish()?;
+/// # Ok::<(), std::io::Error>(())
+/// ```
 #[derive(Default)]
 pub struct ArchiveWriter<W: io::Write> {
     writer: W,
     raw: raw::RawArchiveWriter,
 }
 
+impl ArchiveWriter<std::fs::File> {
+    /// Creates a new `ArchiveWriter` that writes to the given file.
+    ///
+    /// The file will be created if it does not exist, and will be truncated if
+    /// it does.
+    pub fn create(path: impl AsRef<std::path::Path>) -> io::Result<Self> {
+        std::fs::File::create(path).map(Self::new)
+    }
+
+    /// Creates a new `ArchiveWriter` that writes to the given file; error if
+    /// the file exists.
+    pub fn create_new(path: impl AsRef<std::path::Path>) -> io::Result<Self> {
+        std::fs::File::create_new(path).map(Self::new)
+    }
+}
+
 impl<W: io::Write> ArchiveWriter<W> {
+    /// Creates a new `ArchiveWriter` that writes to the given writer.
     pub fn new(writer: W) -> Self {
         ArchiveWriter {
             writer,
@@ -28,10 +81,13 @@ impl<W: io::Write> ArchiveWriter<W> {
         }
     }
 
-    pub fn write_file(
+    /// Writes a file to the archive.
+    ///
+    /// The entire compressed content of the file must fit in memory.
+    pub fn add_file<R: io::Read>(
         &mut self,
         name: &str,
-        mut content: impl io::Read,
+        mut content: R,
         options: &FileOptions,
     ) -> io::Result<()> {
         let mut w = Crc32Writer::new(Compressor::new(
@@ -58,7 +114,13 @@ impl<W: io::Write> ArchiveWriter<W> {
         Ok(())
     }
 
-    pub fn start_stream_file(
+    /// Starts streaming a file to the archive.
+    ///
+    /// This is useful for (but not limited to) very large files that may not
+    /// fit in memory.
+    ///
+    /// This method returns a `FileStreamer` that can be written to.
+    pub fn stream_file(
         &mut self,
         name: &str,
         options: &FileOptions,
@@ -74,7 +136,8 @@ impl<W: io::Write> ArchiveWriter<W> {
         })
     }
 
-    pub fn write_directory(&mut self, name: &str) -> io::Result<()> {
+    /// Adds a directory to the archive.
+    pub fn add_directory(&mut self, name: &str) -> io::Result<()> {
         if !name.ends_with('/') {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -95,7 +158,8 @@ impl<W: io::Write> ArchiveWriter<W> {
         )
     }
 
-    pub fn write_symlink(&mut self, name: &str, target: &str) -> io::Result<()> {
+    /// Adds a symlink to the archive.
+    pub fn add_symlink(&mut self, name: &str, target: &str) -> io::Result<()> {
         self.raw.write_file_raw(
             &mut self.writer,
             name,
@@ -109,6 +173,13 @@ impl<W: io::Write> ArchiveWriter<W> {
         )
     }
 
+    /// Tries to recover from an error by erasing the last entry.
+    ///
+    /// Note that this requires a seeking writer. Calling this when no error
+    /// needs recovery does nothing.
+    ///
+    /// **Footgun**: this requires the user to properly truncate the writer after
+    /// using this method.
     pub fn recover(&mut self) -> io::Result<()>
     where
         W: io::Seek,
@@ -116,16 +187,33 @@ impl<W: io::Write> ArchiveWriter<W> {
         self.raw.recover(&mut self.writer)
     }
 
+    /// Gets a mutable reference to the underlying writer.
+    ///
+    /// It is inadvisable to directly write to the underlying writer.
+    pub fn get_mut(&mut self) -> &mut W {
+        &mut self.writer
+    }
+
+    /// Flushes the underlying stream.
     pub fn flush(&mut self) -> io::Result<()> {
         self.writer.flush()
     }
 
+    /// Finishes writing the archive and get the writer back.
+    ///
+    /// It is necessary to call this method or the resulting archive will not
+    /// be readable.
     pub fn finish(mut self) -> io::Result<W> {
         self.raw.finish(&mut self.writer)?;
         Ok(self.writer)
     }
 }
 
+/// An adapter to stream a ZIP file.
+///
+/// Writing to this value will write to a file in an archive.
+///
+/// It is necessary to call `finish` when done.
 pub struct FileStreamer<'a, W: io::Write> {
     writer: Counter<Crc32Writer<Compressor<raw::RawFileStreamer<'a, &'a mut W>>>>,
 }
@@ -141,6 +229,7 @@ impl<W: io::Write> io::Write for FileStreamer<'_, W> {
 }
 
 impl<W: io::Write> FileStreamer<'_, W> {
+    /// Finishes writing the current file.
     pub fn finish(self) -> io::Result<()> {
         let uncompressed_size = self.writer.amt;
         let crc32 = self.writer.inner.result();

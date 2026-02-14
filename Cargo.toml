@@ -5,15 +5,25 @@ edition = "2024"
 rust-version = "1.87"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
+description = "An simple yet flexible zip library"
 
+repository = "https://github.com/a1phyr/eazip"
+documentation = "https://docs.rs/eazip"
+
+categories = ["compression"]
+keywords = ["zip", "archive"]
 
 [features]
 default = ["deflate", "zstd", "std"]
 
+# Mandatory feature for forward-compatibility.
 std = []
+# Enable deflate compression and decompression.
 deflate = ["dep:flate2"]
+# Enable zstd compression and decompression.
 zstd = ["dep:zstd"]
 
+# Enable parallel ZIP file extraction.
 parallel = ["dep:rayon", "dep:sync_file"]
 
 

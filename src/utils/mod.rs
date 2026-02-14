@@ -5,21 +5,53 @@ pub use crc32::{Crc32Checker, Crc32Writer};
 
 use std::{fmt, io, time::SystemTime};
 
+/// The type of an entry in an archive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileType {
+    /// A file.
     File,
+    /// A directory.
     Directory,
+    /// A symlink.
     Symlink,
 }
 
+impl FileType {
+    /// Returns whether `self` is `FileType::File`.
+    #[inline]
+    pub fn is_file(&self) -> bool {
+        matches!(self, FileType::File)
+    }
+
+    /// Returns whether `self` is `FileType::Directory`.
+    #[inline]
+    pub fn is_directory(&self) -> bool {
+        matches!(self, FileType::Directory)
+    }
+
+    /// Returns whether `self` is `FileType::Symlink`.
+    #[inline]
+    pub fn is_symlink(&self) -> bool {
+        matches!(self, FileType::Symlink)
+    }
+}
+
+/// A timestamp for an entry in an archive.
+///
+/// It is stored as a 64-bits UNIX timestamp, and therefore has second precision.
 #[derive(Clone, Copy)]
-pub struct Timestamp(pub u64);
+pub struct Timestamp(u64);
 
 impl Timestamp {
+    /// Returns the timestamp corresponding to "now".
+    #[inline]
     pub fn now() -> Self {
         Self::from_std(SystemTime::now())
     }
 
+    /// Returns a `Timestamp` from a NTFS timestamp.
+    ///
+    /// Sub-second precision is lost in the process.
     pub fn from_ntfs(time: u64) -> Self {
         /// Time in seconds between NT and Unix epochs
         const NT_EPOCH: u64 = 11_644_473_600;
@@ -29,14 +61,28 @@ impl Timestamp {
         Self(time / 10_000_000)
     }
 
+    /// Returns a `Timestamp` from an UNIX timestamp.
+    #[inline]
     pub fn from_unix(time: u64) -> Self {
         Self(time)
     }
 
+    /// Returns a `Timestamp` from a [`SystemTime`].
+    ///
+    /// Sub-second precision is lost in the process.
+    #[inline]
     pub fn from_std(t: SystemTime) -> Self {
         Self(t.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs())
     }
 
+    /// Converts this timestamp to an UNIX timestamp.
+    #[inline]
+    pub fn to_unix(self) -> u64 {
+        self.0
+    }
+
+    /// Converts this timestamp to a [`SystemTime`].
+    #[inline]
     pub fn to_std(self) -> SystemTime {
         SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(self.0)
     }
