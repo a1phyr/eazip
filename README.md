@@ -1,5 +1,8 @@
 # Eazip
 
+[![Crates.io](https://img.shields.io/crates/v/eazip.svg)](https://crates.io/crates/eazip)
+[![Docs.rs](https://docs.rs/eazip/badge.svg)](https://docs.rs/eazip/)
+
 An simple yet flexible zip library.
 
 This crate provides tools to read and write ZIP archives. It aims at being nice to use for developpers, which includes a good and flexible API, readable source code and clean maintenance.
