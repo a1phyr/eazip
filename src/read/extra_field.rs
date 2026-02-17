@@ -320,13 +320,19 @@ impl<'a> UnixNew<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum AesVersion {
+/// The vendor version of AES encryption.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AesVendorVersion {
+    /// The CRC32 should be verified.
+    ///
+    /// This may lead to data leak.
     Ae1,
+    /// The CRC32 should not be verified.
     Ae2,
 }
 
-#[derive(Debug, Clone, Copy)]
+/// AES mode of encrypted files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AesMode {
     Aes128,
     Aes192,
@@ -335,7 +341,7 @@ pub enum AesMode {
 
 #[derive(Debug, Clone)]
 pub struct Aes {
-    pub version: AesVersion,
+    pub version: AesVendorVersion,
     pub mode: AesMode,
     pub compression: crate::CompressionMethod,
 }
@@ -344,8 +350,8 @@ impl Aes {
     /// Reference: https://www.winzip.com/en/support/aes-encryption/
     fn parse(mut data: DataParser<'_>) -> Option<Self> {
         let version = match data.read_u16()? {
-            1 => AesVersion::Ae1,
-            2 => AesVersion::Ae2,
+            1 => AesVendorVersion::Ae1,
+            2 => AesVendorVersion::Ae2,
             _ => return None,
         };
 

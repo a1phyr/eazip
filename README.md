@@ -49,5 +49,4 @@ println!("Content of hello.txt: {content}");
 - Better validation of file names when writing files.
 - Support of timestamps when writing.
 - Support of all timestamps when reading (extended versions are supported, but not the basic one).
-- Provide better metadata for encrypted files.
 - More flexible ("raw") writer support.

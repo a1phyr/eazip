@@ -16,6 +16,8 @@ mod raw;
 
 use extra_field::{ExtraField, ExtraFields};
 
+pub use extra_field::{AesMode, AesVendorVersion};
+
 #[cold]
 fn invalid(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, msg)
@@ -46,6 +48,21 @@ impl<R: Read + Seek> ReadSeek for R {}
 
 trait BufReadSeek: BufRead + Seek {}
 impl<R: BufRead + Seek> BufReadSeek for R {}
+
+/// A method that may be used to encrypt a file.
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+pub enum EncryptionMethod {
+    Legacy,
+    /// The file is encrypted using AES.
+    ///
+    /// See [the specification](https://www.winzip.com/en/support/aes-encryption/#file-format1)
+    /// for the format of the encrypted files.
+    Aes {
+        mode: AesMode,
+        version: AesVendorVersion,
+    },
+}
 
 /// An open ZIP archive without a reader
 pub struct RawArchive {
@@ -188,7 +205,6 @@ fn check_name(name: &str) -> Option<Box<str>> {
 /// The metadata of a ZIP entry.
 #[derive(Debug)]
 pub struct Metadata {
-    is_encrypted: bool,
     header_offset: u64,
     data_offset: u64,
 
@@ -201,6 +217,8 @@ pub struct Metadata {
     pub modification_time: Option<Timestamp>,
     pub access_time: Option<Timestamp>,
     pub creation_time: Option<Timestamp>,
+
+    pub encryption: Option<EncryptionMethod>,
 
     name: Box<str>,
     comment: Box<str>,
@@ -230,7 +248,7 @@ impl Metadata {
 
         let mut meta = Self {
             crc32: header.crc32.get(),
-            is_encrypted,
+            encryption: is_encrypted.then_some(EncryptionMethod::Legacy),
             header_offset: 0,
             data_offset: 0,
 
@@ -281,7 +299,7 @@ impl Metadata {
 
         let mut meta = Self {
             crc32: header.crc32.get(),
-            is_encrypted,
+            encryption: is_encrypted.then_some(EncryptionMethod::Legacy),
             header_offset: header.local_header_offset.get() as u64,
             data_offset: 0,
 
@@ -355,10 +373,31 @@ impl Metadata {
                     self.creation_time = ts.creation_time;
                 }
 
+                ExtraField::Aes(aes) => {
+                    if self.compression_method != CompressionMethod::AES
+                        || (aes.version == AesVendorVersion::Ae2 && self.crc32 != 0)
+                    {
+                        return None;
+                    }
+                    let Some(enc @ EncryptionMethod::Legacy) = &mut self.encryption else {
+                        return None;
+                    };
+
+                    *enc = EncryptionMethod::Aes {
+                        mode: aes.mode,
+                        version: aes.version,
+                    };
+                    self.compression_method = aes.compression;
+                }
+
                 ExtraField::Invalid(_, _) => return None,
 
                 _ => (),
             }
+        }
+
+        if self.compression_method == CompressionMethod::AES {
+            return None;
         }
 
         Some(())
@@ -366,7 +405,7 @@ impl Metadata {
 
     /// Returns `true` if this file is encrypted.
     pub fn is_encrypted(&self) -> bool {
-        self.is_encrypted
+        self.encryption.is_some()
     }
 
     /// Gets the name of this entry.
