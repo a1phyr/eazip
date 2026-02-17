@@ -68,6 +68,11 @@ fn self_test() {
 }
 
 #[test]
+fn infozip() {
+    test_one("tests/infozip.zip");
+}
+
+#[test]
 fn gnome() {
     test_one("tests/gnome.zip");
 }
