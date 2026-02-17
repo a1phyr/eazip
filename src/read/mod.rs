@@ -420,8 +420,17 @@ impl Metadata {
 
     /// Returns a reader with the content of the file.
     ///
-    /// Unsupported compression methods will return an error.
+    /// Unsupported compression methods and encrypted files will return an error.
     pub fn read<R: BufRead + Seek>(&self, reader: R) -> io::Result<impl Read + use<R>> {
+        #[cold]
+        fn encrypted_file() -> io::Error {
+            io::Error::new(io::ErrorKind::Unsupported, "unsupported encrypted file")
+        }
+
+        if self.encryption.is_some() {
+            return Err(encrypted_file());
+        }
+
         let reader = Decompressor::new(self.read_raw(reader)?, self.compression_method)?;
         Ok(self.content_checker(reader))
     }
