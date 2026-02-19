@@ -250,6 +250,49 @@ fn read_data_descriptor(
     Ok(())
 }
 
+fn check_local_entry(
+    reader: &mut Counter<&mut dyn ReadSeek>,
+    entry: &mut Metadata,
+    buf: &mut Vec<u8>,
+) -> io::Result<()> {
+    let mut local_entry = read_local_header(reader, buf)?;
+    entry.data_offset = reader.amt;
+
+    if entry.file_type.is_directory() {
+        // Directories should always be empty
+        if entry.compression_method != crate::CompressionMethod::STORE || entry.compressed_size != 0
+        {
+            return Err(invalid_entry());
+        }
+    } else {
+        // Skip the compressed file
+        reader.advance(entry.compressed_size as _)?;
+    }
+
+    // Read the data descriptor if needed
+    read_data_descriptor(reader, &mut local_entry)?;
+
+    // Now we can check that both header are consistent
+    if entry.compression_method != local_entry.compression_method
+        || entry.name != local_entry.name
+        || entry.compressed_size != local_entry.compressed_size
+        || entry.uncompressed_size != local_entry.uncompressed_size
+        || entry.crc32 != local_entry.crc32
+        || entry.flags != local_entry.flags
+    {
+        return Err(invalid_entry());
+    }
+
+    // Bonus consistency check
+    if entry.compression_method == crate::CompressionMethod::STORE
+        && entry.compressed_size != entry.uncompressed_size
+    {
+        return Err(invalid_entry());
+    }
+
+    Ok(())
+}
+
 fn read_central_directory(
     reader: &mut dyn ReadSeek,
     offset: u64,
@@ -287,25 +330,7 @@ fn read_central_directory(
     };
 
     for entry in &mut entries {
-        let mut local_entry = read_local_header(&mut reader, &mut buf)?;
-        entry.data_offset = reader.amt;
-
-        // Skip the compressed file
-        reader.advance(entry.compressed_size as _)?;
-
-        // Read the data descriptor if needed
-        read_data_descriptor(&mut reader, &mut local_entry)?;
-
-        // Now we can check that both header are consistent
-        if entry.compression_method != local_entry.compression_method
-            || entry.name != local_entry.name
-            || entry.compressed_size != local_entry.compressed_size
-            || entry.uncompressed_size != local_entry.uncompressed_size
-            || entry.crc32 != local_entry.crc32
-            || entry.flags != local_entry.flags
-        {
-            return Err(invalid_entry());
-        }
+        check_local_entry(&mut reader, entry, &mut buf)?;
     }
 
     if reader.amt != offset {
