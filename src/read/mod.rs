@@ -212,7 +212,7 @@ fn check_name(name: &str) -> Option<Box<str>> {
 }
 
 /// The metadata of a ZIP entry.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Metadata {
     header_offset: u64,
     data_offset: u64,
@@ -596,6 +596,11 @@ impl<R: BufRead + Seek> Archive<R> {
         self.get_by_index(index)
     }
 
+    /// Gets the index of a file in [`Self::entries`] by its name.
+    pub fn index_of(&self, name: &str) -> Option<usize> {
+        self.names.get(name).copied()
+    }
+
     /// Gets the comment of the archive.
     pub fn commment(&self) -> &[u8] {
         &self.inner.comment
@@ -651,6 +656,13 @@ impl<'a, R: BufRead + Seek> File<'a, R> {
     ///
     /// The uncompressed content should be checked with [`Metadata::content_checker`].
     pub fn read_raw(&mut self) -> io::Result<io::Take<&mut R>> {
+        self.metadata.read_raw(self.reader)
+    }
+
+    /// Turns self into a reader with the raw, compressed, content of the file.
+    ///
+    /// The uncompressed content should be checked with [`Metadata::content_checker`].
+    pub fn into_read_raw(self) -> io::Result<io::Take<&'a mut R>> {
         self.metadata.read_raw(self.reader)
     }
 }
