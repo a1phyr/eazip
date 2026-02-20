@@ -16,8 +16,6 @@ mod raw;
 
 use extra_field::{ExtraField, ExtraFields};
 
-pub use extra_field::{AesMode, AesVendorVersion};
-
 #[cold]
 fn invalid(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, msg)
@@ -49,18 +47,29 @@ impl<R: Read + Seek> ReadSeek for R {}
 trait BufReadSeek: BufRead + Seek {}
 impl<R: BufRead + Seek> BufReadSeek for R {}
 
-/// A method that may be used to encrypt a file.
+/// The method used to encrypt a file.
+///
+/// `eazip` does not provide the tools to decrypt these files, but provides the
+/// required metadata if you really need to.
+///
+/// This is only provided for completeness, please don't use this in scenarios
+/// where security actually matters and use proper tools (eg `age`).
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub enum EncryptionMethod {
-    Legacy,
-    /// The file is encrypted using AES.
+    /// Legacy ZipCrypto encryption.
+    ZipCrypto,
+    /// The file is encrypted using AES in CTR mode.
     ///
     /// See [the specification](https://www.winzip.com/en/support/aes-encryption/#file-format1)
     /// for the format of the encrypted files.
     Aes {
-        mode: AesMode,
-        version: AesVendorVersion,
+        /// The size of the AES key. This may be 128, 192 or 256 bytes.
+        key_size: u16,
+        /// Whether to check the CRC32 of the decypted content.
+        ///
+        /// If `true`, this will lead to data leak.
+        check_crc32: bool,
     },
 }
 
@@ -248,7 +257,7 @@ impl Metadata {
 
         let mut meta = Self {
             crc32: header.crc32.get(),
-            encryption: is_encrypted.then_some(EncryptionMethod::Legacy),
+            encryption: is_encrypted.then_some(EncryptionMethod::ZipCrypto),
             header_offset: 0,
             data_offset: 0,
 
@@ -299,7 +308,7 @@ impl Metadata {
 
         let mut meta = Self {
             crc32: header.crc32.get(),
-            encryption: is_encrypted.then_some(EncryptionMethod::Legacy),
+            encryption: is_encrypted.then_some(EncryptionMethod::ZipCrypto),
             header_offset: header.local_header_offset.get() as u64,
             data_offset: 0,
 
@@ -375,17 +384,17 @@ impl Metadata {
 
                 ExtraField::Aes(aes) => {
                     if self.compression_method != CompressionMethod::AES
-                        || (aes.version == AesVendorVersion::Ae2 && self.crc32 != 0)
+                        || (!aes.check_crc32 && self.crc32 != 0)
                     {
                         return None;
                     }
-                    let Some(enc @ EncryptionMethod::Legacy) = &mut self.encryption else {
+                    let Some(enc @ EncryptionMethod::ZipCrypto) = &mut self.encryption else {
                         return None;
                     };
 
                     *enc = EncryptionMethod::Aes {
-                        mode: aes.mode,
-                        version: aes.version,
+                        key_size: aes.key_size,
+                        check_crc32: aes.check_crc32,
                     };
                     self.compression_method = aes.compression;
                 }
