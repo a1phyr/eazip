@@ -212,7 +212,7 @@ fn check_name(name: &str) -> Option<Box<str>> {
 }
 
 /// The metadata of a ZIP entry.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Metadata {
     header_offset: u64,
     data_offset: u64,
@@ -659,11 +659,13 @@ impl<'a, R: BufRead + Seek> File<'a, R> {
         self.metadata.read_raw(self.reader)
     }
 
-    /// Turns self into a reader with the raw, compressed, content of the file.
+    /// Consumes self, returning the underlying reader.
     ///
-    /// The uncompressed content should be checked with [`Metadata::content_checker`].
-    pub fn into_read_raw(self) -> io::Result<io::Take<&'a mut R>> {
-        self.metadata.read_raw(self.reader)
+    /// This reader can be used with [`Metadata::read_raw`] to read the raw,
+    /// compressed content of the file. The uncompressed content should then be
+    /// checked with [`Metadata::content_checker`].
+    pub fn into_reader(self) -> &'a mut R {
+        self.reader
     }
 }
 
