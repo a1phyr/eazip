@@ -215,7 +215,7 @@ fn check_name(name: &str) -> Option<Box<str>> {
 #[derive(Debug)]
 pub struct Metadata {
     header_offset: u64,
-    data_offset: u64,
+    pub data_offset: u64,
 
     pub compressed_size: u64,
     pub uncompressed_size: u64,
