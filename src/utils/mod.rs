@@ -101,6 +101,7 @@ pub(crate) struct Counter<T> {
 }
 
 impl<T> Counter<T> {
+    #[inline]
     pub const fn new(inner: T) -> Self {
         Self { amt: 0, inner }
     }
@@ -129,10 +130,12 @@ impl<R: io::Read> io::Read for Counter<R> {
 }
 
 impl<R: io::BufRead> io::BufRead for Counter<R> {
+    #[inline]
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
         self.inner.fill_buf()
     }
 
+    #[inline]
     fn consume(&mut self, amount: usize) {
         self.amt += amount as u64;
     }
@@ -145,6 +148,7 @@ impl<W: io::Write> io::Write for Counter<W> {
         Ok(n)
     }
 
+    #[inline]
     fn flush(&mut self) -> io::Result<()> {
         self.inner.flush()
     }

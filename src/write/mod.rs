@@ -74,6 +74,7 @@ impl ArchiveWriter<std::fs::File> {
 
 impl<W: io::Write> ArchiveWriter<W> {
     /// Creates a new `ArchiveWriter` that writes to the given writer.
+    #[inline]
     pub fn new(writer: W) -> Self {
         ArchiveWriter {
             writer,
@@ -180,6 +181,7 @@ impl<W: io::Write> ArchiveWriter<W> {
     ///
     /// **Footgun**: this requires the user to properly truncate the writer after
     /// using this method.
+    #[inline]
     pub fn recover(&mut self) -> io::Result<()>
     where
         W: io::Seek,
@@ -190,11 +192,13 @@ impl<W: io::Write> ArchiveWriter<W> {
     /// Gets a mutable reference to the underlying writer.
     ///
     /// It is inadvisable to directly write to the underlying writer.
+    #[inline]
     pub fn get_mut(&mut self) -> &mut W {
         &mut self.writer
     }
 
     /// Flushes the underlying stream.
+    #[inline]
     pub fn flush(&mut self) -> io::Result<()> {
         self.writer.flush()
     }
@@ -203,6 +207,7 @@ impl<W: io::Write> ArchiveWriter<W> {
     ///
     /// It is necessary to call this method or the resulting archive will not
     /// be readable.
+    #[inline]
     pub fn finish(mut self) -> io::Result<W> {
         self.raw.finish(&mut self.writer)?;
         Ok(self.writer)
@@ -219,10 +224,12 @@ pub struct FileStreamer<'a, W: io::Write> {
 }
 
 impl<W: io::Write> io::Write for FileStreamer<'_, W> {
+    #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.writer.write(buf)
     }
 
+    #[inline]
     fn flush(&mut self) -> io::Result<()> {
         self.writer.flush()
     }

@@ -7,6 +7,7 @@ pub struct Crc32Checker<R> {
 }
 
 impl<R> Crc32Checker<R> {
+    #[inline]
     pub fn new(reader: R, expected: u32) -> Self {
         Self {
             hasher: crc32fast::Hasher::new(),
@@ -70,6 +71,7 @@ pub struct Crc32Writer<W> {
 }
 
 impl<W: Write> Crc32Writer<W> {
+    #[inline]
     pub fn new(writer: W) -> Self {
         Self {
             hasher: crc32fast::Hasher::new(),
@@ -77,10 +79,12 @@ impl<W: Write> Crc32Writer<W> {
         }
     }
 
+    #[inline]
     pub fn into_inner(self) -> W {
         self.writer
     }
 
+    #[inline]
     pub fn result(&self) -> u32 {
         self.hasher.clone().finalize()
     }
@@ -93,6 +97,7 @@ impl<W: Write> Write for Crc32Writer<W> {
         Ok(n)
     }
 
+    #[inline]
     fn flush(&mut self) -> io::Result<()> {
         self.writer.flush()
     }
