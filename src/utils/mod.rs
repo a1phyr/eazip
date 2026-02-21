@@ -138,6 +138,7 @@ impl<R: io::BufRead> io::BufRead for Counter<R> {
     #[inline]
     fn consume(&mut self, amount: usize) {
         self.amt += amount as u64;
+        self.inner.consume(amount);
     }
 }
 
