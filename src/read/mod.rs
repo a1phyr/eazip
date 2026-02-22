@@ -566,6 +566,16 @@ impl Archive<io::BufReader<std::fs::File>> {
 
 impl<R: BufRead + Seek> Archive<R> {
     /// Opens a ZIP archive from a reader.
+    ///
+    /// This also perform many validation checks on the archive to make sure
+    /// that is it well-formed and does not have dangerous or duplicated paths.
+    /// The validity of file contents is checked lazily when reading them.
+    ///
+    /// The exact rules around validation are not part of semver guaranties and
+    /// may change at every release.
+    ///
+    /// **The targets of symlinks are not checked yet here**, though they are
+    /// through `extract` and `extract_parallel`.
     pub fn new(mut reader: R) -> io::Result<Self> {
         let inner = RawArchive::new(&mut reader)?;
 
