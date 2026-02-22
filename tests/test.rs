@@ -4,8 +4,13 @@ use std::io::Write;
 fn test_one(name: &str) {
     let mut ar = eazip::Archive::open(name).unwrap();
 
-    // Windows 10 does not encode directories nor support chinese characters
-    let expected_len = if name != "tests/windows10.zip" { 5 } else { 3 };
+    let expected_len = match name {
+        // Windows 10 does not encode directories nor support chinese characters
+        "tests/windows10.zip" => 3,
+        // Go does not support symlinks
+        "tests/go.zip" => 4,
+        _ => 5,
+    };
 
     let len = ar.entries().len();
     assert_eq!(expected_len, len);
@@ -104,4 +109,9 @@ fn windows10() {
 #[test]
 fn windows11() {
     test_one("tests/windows11.zip");
+}
+
+#[test]
+fn go() {
+    test_one("tests/go.zip");
 }
