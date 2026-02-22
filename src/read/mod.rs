@@ -605,6 +605,11 @@ impl<R: BufRead + Seek> Archive<R> {
         self.get_by_index(index)
     }
 
+    /// Gets the index of a file in [`Self::entries`] by its name.
+    pub fn index_of(&self, name: &str) -> Option<usize> {
+        self.names.get(name).copied()
+    }
+
     /// Gets the comment of the archive.
     #[inline]
     pub fn commment(&self) -> &[u8] {
@@ -668,6 +673,15 @@ impl<'a, R: BufRead + Seek> File<'a, R> {
     #[inline]
     pub fn read_raw(&mut self) -> io::Result<io::Take<&mut R>> {
         self.metadata.read_raw(self.reader)
+    }
+
+    /// Consumes self, returning the underlying reader.
+    ///
+    /// This reader can be used with [`Metadata::read_raw`] to read the raw,
+    /// compressed content of the file. The uncompressed content should then be
+    /// checked with [`Metadata::content_checker`].
+    pub fn into_reader(self) -> &'a mut R {
+        self.reader
     }
 }
 
