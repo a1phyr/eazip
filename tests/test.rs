@@ -115,3 +115,8 @@ fn windows11() {
 fn go() {
     test_one("tests/go.zip");
 }
+
+#[test]
+fn python() {
+    test_one("tests/python.zip");
+}
