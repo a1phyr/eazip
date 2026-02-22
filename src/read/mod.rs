@@ -654,6 +654,9 @@ pub struct File<'a, R> {
 
 impl<'a, R: BufRead + Seek> File<'a, R> {
     /// Gets the metadata of the file.
+    ///
+    /// The lifetime of the returned reference is bound to the `Archive`, so it
+    /// can outlive `self`.
     #[inline]
     pub fn metadata(&self) -> &'a Metadata {
         self.metadata
