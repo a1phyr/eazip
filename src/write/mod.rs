@@ -189,6 +189,12 @@ impl<W: io::Write> ArchiveWriter<W> {
         self.raw.recover(&mut self.writer)
     }
 
+    /// Gets a shared reference to the underlying writer.
+    #[inline]
+    pub fn get_ref(&self) -> &W {
+        &self.writer
+    }
+
     /// Gets a mutable reference to the underlying writer.
     ///
     /// It is inadvisable to directly write to the underlying writer.
