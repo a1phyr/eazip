@@ -564,6 +564,19 @@ impl Archive<io::BufReader<std::fs::File>> {
     }
 }
 
+#[cfg(feature = "parallel")]
+impl Archive<io::BufReader<sync_file::SyncFile>> {
+    /// Opens the given file as a ZIP archive ready for parallel extract.
+    #[inline]
+    pub fn open_parallel(path: impl AsRef<std::path::Path>) -> io::Result<Self> {
+        Self::_open(path.as_ref())
+    }
+
+    fn _open(path: &std::path::Path) -> io::Result<Self> {
+        Self::new(io::BufReader::new(sync_file::SyncFile::open(path)?))
+    }
+}
+
 impl<R: BufRead + Seek> Archive<R> {
     /// Opens a ZIP archive from a reader.
     ///
