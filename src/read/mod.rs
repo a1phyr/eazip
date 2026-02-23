@@ -21,6 +21,16 @@ fn invalid(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, msg)
 }
 
+#[cold]
+fn encrypted_file() -> io::Error {
+    io::Error::new(io::ErrorKind::Unsupported, "encrypted file")
+}
+
+#[cold]
+fn compressed() -> io::Error {
+    io::Error::new(io::ErrorKind::Unsupported, "compressed file")
+}
+
 fn validate_symlink(name: &str, target: &str) -> bool {
     if target.starts_with('/') || target.contains('\\') || (cfg!(windows) && target.contains(':')) {
         return false;
@@ -437,17 +447,34 @@ impl Metadata {
     ///
     /// Unsupported compression methods and encrypted files will return an error.
     pub fn read<R: BufRead + Seek>(&self, reader: R) -> io::Result<impl Read + use<R>> {
-        #[cold]
-        fn encrypted_file() -> io::Error {
-            io::Error::new(io::ErrorKind::Unsupported, "unsupported encrypted file")
-        }
-
         if self.encryption.is_some() {
             return Err(encrypted_file());
         }
 
         let reader = Decompressor::new(self.read_raw(reader)?, self.compression_method)?;
         Ok(self.content_checker(reader))
+    }
+
+    /// Returns a reader with the content of the file.
+    ///
+    /// Errors if the file is compressed, encrypted or corrupted. Is is not
+    /// necessary to use `Metadata::content_checker` on the result.
+    ///
+    /// It is useful if you know that the file is stored as-is and you want to
+    /// take advantage of the `BufReader` or the `Seek` implementation.
+    pub fn read_stored<R: Read + Seek>(&self, mut reader: R) -> io::Result<io::Take<R>> {
+        if self.encryption.is_some() {
+            return Err(encrypted_file());
+        }
+        if self.compression_method != CompressionMethod::STORE {
+            return Err(compressed());
+        }
+
+        // Check CRC beforehand. Length has already been checked.
+        let mut checker = Crc32Checker::new(self.read_raw(&mut reader)?, self.crc32);
+        std::io::copy(&mut checker, &mut io::sink())?;
+
+        self.read_raw(reader)
     }
 
     /// Returns a reader with the raw, uncompressed, content of the file.
@@ -697,6 +724,17 @@ impl<'a, R: BufRead + Seek> File<'a, R> {
     #[inline]
     pub fn read(&mut self) -> io::Result<impl Read + '_> {
         self.metadata.read(&mut *self.reader)
+    }
+
+    /// Returns a reader with the content of the file.
+    ///
+    /// Errors if the file is compressed, encrypted or corrupted. Is is not
+    /// necessary to use `Metadata::content_checker` on the result.
+    ///
+    /// It is useful if you know that the file is stored as-is and you want to
+    /// take advantage of the `BufReader` or the `Seek` implementation.
+    pub fn read_stored(self) -> io::Result<io::Take<&'a mut R>> {
+        self.metadata.read_stored(self.reader)
     }
 
     /// Returns a reader with the raw, compressed, content of the file.
