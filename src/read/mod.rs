@@ -649,6 +649,12 @@ impl<R: BufRead + Seek> Archive<R> {
         self.inner.parallel_extract(&self.reader, at.as_ref())
     }
 
+    /// Gets a shared reference to the underlying reader.
+    #[inline]
+    pub fn get_ref(&self) -> &R {
+        &self.reader
+    }
+
     /// Gets a mutable reference to the underlying reader.
     #[inline]
     pub fn get_mut(&mut self) -> &mut R {
