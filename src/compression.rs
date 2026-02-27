@@ -112,6 +112,17 @@ impl<R: io::BufRead> Decompressor<R> {
         }
     }
 
+    /// Gets a shared reference to the underlying reader.
+    pub fn get_ref(&self) -> &R {
+        match &self.0 {
+            DecompressorImpl::Store(r) => r,
+            #[cfg(feature = "deflate")]
+            DecompressorImpl::Deflate(r) => r.get_ref(),
+            #[cfg(feature = "zstd")]
+            DecompressorImpl::Zstd(r) => r.get_ref(),
+        }
+    }
+
     /// Gets a mutable reference to the underlying reader.
     ///
     /// It is inadvisable to directly read from the underlying reader.
@@ -210,6 +221,17 @@ impl<W: io::Write> Compressor<W> {
             CompressorImpl::Deflate(_) => CompressionMethod::DEFLATE,
             #[cfg(feature = "zstd")]
             CompressorImpl::Zstd(_) => CompressionMethod::ZSTD,
+        }
+    }
+
+    /// Gets a shared reference to the underlying writer.
+    pub fn get_ref(&self) -> &W {
+        match &self.0 {
+            CompressorImpl::Store(w) => w,
+            #[cfg(feature = "deflate")]
+            CompressorImpl::Deflate(w) => w.get_ref(),
+            #[cfg(feature = "zstd")]
+            CompressorImpl::Zstd(w) => w.get_ref(),
         }
     }
 
