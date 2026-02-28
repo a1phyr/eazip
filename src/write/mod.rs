@@ -5,7 +5,7 @@ use crate::{
     compression::Compressor,
     utils::{Counter, Crc32Writer},
 };
-use std::io;
+use std::{fmt, io};
 
 mod raw;
 
@@ -50,7 +50,7 @@ pub struct FileOptions {
 /// archive.finish()?;
 /// # Ok::<(), std::io::Error>(())
 /// ```
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct ArchiveWriter<W: io::Write> {
     writer: W,
     raw: raw::RawArchiveWriter,
@@ -250,5 +250,11 @@ impl<W: io::Write> FileStreamer<'_, W> {
         let raw_writer = self.writer.inner.into_inner().finish()?;
 
         raw_writer.finish(uncompressed_size, crc32)
+    }
+}
+
+impl<'a, W: io::Write + fmt::Debug> fmt::Debug for FileStreamer<'a, W> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("FileStreamer { .. }")
     }
 }

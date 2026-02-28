@@ -84,6 +84,7 @@ pub enum EncryptionMethod {
 }
 
 /// An open ZIP archive without a reader
+#[derive(Debug)]
 pub struct RawArchive {
     entries: Vec<Metadata>,
     comment: Box<[u8]>,
@@ -573,6 +574,7 @@ impl Metadata {
 ///
 /// # Ok::<(), std::io::Error>(())
 /// ```
+#[derive(Debug)]
 pub struct Archive<R> {
     inner: RawArchive,
     names: HashMap<Box<str>, usize>,
@@ -703,6 +705,7 @@ impl<R: BufRead + Seek> Archive<R> {
 }
 
 /// A file in a ZIP archive.
+#[derive(Debug)]
 pub struct File<'a, R> {
     metadata: &'a Metadata,
     reader: &'a mut R,

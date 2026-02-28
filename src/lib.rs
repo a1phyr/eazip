@@ -41,6 +41,7 @@
 //! ```
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![warn(missing_debug_implementations)]
 
 #[cfg(not(feature = "std"))]
 compile_error!("`no_std` is not supported yet");

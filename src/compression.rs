@@ -74,6 +74,15 @@ fn unsupported_method(method: CompressionMethod) -> io::Error {
 /// An adapter to decompress a stream.
 pub struct Decompressor<R>(DecompressorImpl<R>);
 
+impl<R: io::BufRead + fmt::Debug> fmt::Debug for Decompressor<R> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Deompressor")
+            .field("method", &self.compression_method())
+            .field("reader", &self.get_ref())
+            .finish()
+    }
+}
+
 enum DecompressorImpl<R> {
     Store(R),
     #[cfg(feature = "deflate")]
@@ -171,6 +180,15 @@ impl<R: io::BufRead> io::Read for Decompressor<R> {
 
 /// An adapter to compress a stream.
 pub struct Compressor<W: io::Write>(CompressorImpl<W>);
+
+impl<W: io::Write + fmt::Debug> fmt::Debug for Compressor<W> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Compressor")
+            .field("method", &self.compression_method())
+            .field("writer", &self.get_ref())
+            .finish()
+    }
+}
 
 enum CompressorImpl<W: io::Write> {
     Store(W),

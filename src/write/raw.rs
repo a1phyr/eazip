@@ -3,7 +3,10 @@ use crate::{
     types::{self, Pod},
     utils::Counter,
 };
-use std::io::{self, Write};
+use std::{
+    fmt,
+    io::{self, Write},
+};
 
 trait WriteExt: Write {
     fn write_pod<T: Pod>(&mut self, data: &T) -> io::Result<()> {
@@ -51,7 +54,7 @@ struct RawMetadata {
     meta: Metadata,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 enum State {
     #[default]
     Default,
@@ -64,6 +67,16 @@ pub struct RawArchiveWriter {
     n_entries: u64,
     central_headers: Vec<u8>,
     position: u64,
+}
+
+impl fmt::Debug for RawArchiveWriter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RawArchiveWriter")
+            .field("state", &self.state)
+            .field("n_entries", &self.n_entries)
+            .field("position", &self.position)
+            .finish()
+    }
 }
 
 impl RawArchiveWriter {
