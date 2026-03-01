@@ -39,7 +39,7 @@ impl FileType {
 /// A timestamp for an entry in an archive.
 ///
 /// It is stored as a 64-bits UNIX timestamp, and therefore has second precision.
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Timestamp(u64);
 
 impl Timestamp {
