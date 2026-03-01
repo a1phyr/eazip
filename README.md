@@ -35,6 +35,7 @@ println!("Content of hello.txt: {content}");
 - Don't panic under any input.
 - Have readable code and a simple API.
 - Well-tested against common ZIP files tools.
+- Be performant.
 
 ## Non-goals
 
