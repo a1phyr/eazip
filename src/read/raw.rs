@@ -298,6 +298,7 @@ fn check_local_entry(
     // Bonus consistency check
     if entry.compression_method == crate::CompressionMethod::STORE
         && entry.compressed_size != entry.uncompressed_size
+        && entry.encryption.is_none()
     {
         return Err(invalid_entry());
     }
