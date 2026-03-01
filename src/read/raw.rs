@@ -302,6 +302,15 @@ fn check_local_entry(
         return Err(invalid_entry());
     }
 
+    // Extended timestamp entries usually stores creation and access timestamps
+    // in local headers only
+    if entry.creation_time.is_none() {
+        entry.creation_time = local_entry.creation_time;
+    }
+    if entry.access_time.is_none() {
+        entry.access_time = local_entry.access_time;
+    }
+
     Ok(())
 }
 
