@@ -27,6 +27,15 @@ fn multi_disk() -> io::Error {
     )
 }
 
+/// Checks equality between the content of the options if both are `Some`.
+#[inline]
+fn opt_eq<T: Eq>(a: &Option<T>, b: &Option<T>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => a == b,
+        _ => true,
+    }
+}
+
 trait ReadExt: io::Read {
     fn read_variable_fields<'a, const N: usize>(
         &mut self,
@@ -279,6 +288,9 @@ fn check_local_entry(
         || entry.uncompressed_size != local_entry.uncompressed_size
         || entry.crc32 != local_entry.crc32
         || entry.flags != local_entry.flags
+        || !opt_eq(&entry.modification_time, &local_entry.modification_time)
+        || !opt_eq(&entry.access_time, &local_entry.access_time)
+        || !opt_eq(&entry.creation_time, &local_entry.access_time)
     {
         return Err(invalid_entry());
     }
