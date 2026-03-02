@@ -4,6 +4,7 @@ use crate::{
     utils::Counter,
 };
 use std::{
+    collections::HashSet,
     fmt,
     io::{self, Write},
 };
@@ -64,7 +65,7 @@ enum State {
 #[derive(Default)]
 pub struct RawArchiveWriter {
     state: State,
-    n_entries: u64,
+    entries: HashSet<Box<str>>,
     central_headers: Vec<u8>,
     position: u64,
 }
@@ -73,7 +74,7 @@ impl fmt::Debug for RawArchiveWriter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RawArchiveWriter")
             .field("state", &self.state)
-            .field("n_entries", &self.n_entries)
+            .field("entries", &self.entries)
             .field("position", &self.position)
             .finish()
     }
@@ -105,6 +106,22 @@ impl RawArchiveWriter {
         Ok(())
     }
 
+    fn check_name(&self, name: &str) -> io::Result<Box<str>> {
+        #[cold]
+        fn invalid_name(msg: &str) -> io::Error {
+            io::Error::new(io::ErrorKind::InvalidInput, msg)
+        }
+
+        if u16::try_from(name.len()).is_err() {
+            return Err(invalid_name("file name too long"));
+        }
+        if self.entries.contains(name) {
+            return Err(invalid_name("duplicated file name"));
+        }
+
+        crate::utils::validate_name(name).ok_or_else(|| invalid_name("invalid file name"))
+    }
+
     pub fn write_file_raw<W: Write>(
         &mut self,
         writer: &mut W,
@@ -113,6 +130,7 @@ impl RawArchiveWriter {
         meta: Metadata,
     ) -> io::Result<()> {
         self.check_state()?;
+        let name = self.check_name(name)?;
         self.state = State::Writing(self.position);
 
         let mut counter = Counter::new(writer);
@@ -123,7 +141,7 @@ impl RawArchiveWriter {
             meta,
         };
 
-        self.write_local_header(&mut counter, name, &meta)?;
+        self.write_local_header(&mut counter, &name, &meta)?;
         counter.write_all(content)?;
         self.push_central_header(name, &meta, self.position)?;
 
@@ -143,11 +161,12 @@ impl RawArchiveWriter {
         let mut writer = Counter::new(writer);
 
         self.check_state()?;
+        let file_name = self.check_name(name)?;
         self.state = State::Writing(self.position);
 
         self.write_local_header(
             &mut writer,
-            name,
+            &file_name,
             &RawMetadata {
                 is_streaming: true,
                 compressed_size: 0,
@@ -164,7 +183,7 @@ impl RawArchiveWriter {
             started_at: writer.amt,
             writer,
 
-            file_name: name.into(),
+            file_name,
             local_header_offset,
             compression_method: options.compression_method,
 
@@ -178,13 +197,6 @@ impl RawArchiveWriter {
         name: &str,
         meta: &RawMetadata,
     ) -> io::Result<()> {
-        let Ok(name_len) = name.len().try_into() else {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidFilename,
-                "file name too long",
-            ));
-        };
-
         let zip64 = LocalZip64 {
             id: types::U16::set(0x0001),
             size: types::U16::set(16),
@@ -204,7 +216,7 @@ impl RawArchiveWriter {
             crc32: types::U32::set(meta.meta.crc32),
             compressed_size: types::U32::set(0xffff_ffff),
             uncompressed_size: types::U32::set(0xffff_ffff),
-            file_name_length: types::U16::set(name_len),
+            file_name_length: types::U16::set(name.len() as u16),
             extra_fields_length: types::U16::set(size_of::<LocalZip64>() as _),
         })?;
 
@@ -216,15 +228,14 @@ impl RawArchiveWriter {
 
     fn push_central_header(
         &mut self,
-        name: &str,
+        name: Box<str>,
         meta: &RawMetadata,
         local_header_offset: u64,
     ) -> io::Result<()> {
         self.central_headers.try_reserve(
             size_of::<types::CentralFileHeader>() + size_of::<CentralZip64>() + name.len(),
         )?;
-
-        self.n_entries += 1;
+        self.entries.try_reserve(1)?;
 
         debug_assert!(name.len() < u16::MAX as usize);
 
@@ -270,6 +281,8 @@ impl RawArchiveWriter {
         self.central_headers.extend_from_slice(name.as_bytes());
         self.central_headers.extend_from_slice(zip64.as_bytes());
 
+        self.entries.insert(name);
+
         Ok(())
     }
 
@@ -283,6 +296,8 @@ impl RawArchiveWriter {
         let central_directory_size = self.central_headers.len() as u64;
         let central_directory_64_offset = central_directory_offset + central_directory_size;
 
+        let total_entries = types::U64::set(self.entries.len() as u64);
+
         writer.write_pod(&types::EndOfCentralDirectory64 {
             signature: types::EndOfCentralDirectory64::SIGNATURE,
             record_size: types::U64::set(44),
@@ -290,8 +305,8 @@ impl RawArchiveWriter {
             version_needed: types::U16::set(45), // Version 4.5 for Zip64 support
             disk_number: types::U32::set(0),
             disk_with_central_directory: types::U32::set(0),
-            entries_on_this_disk: types::U64::set(self.n_entries),
-            total_entries: types::U64::set(self.n_entries),
+            entries_on_this_disk: total_entries,
+            total_entries,
             central_directory_size: types::U64::set(central_directory_size),
             central_directory_offset: types::U64::set(central_directory_offset),
         })?;
@@ -352,7 +367,7 @@ impl<W: Write> RawFileStreamer<'_, W> {
         self.raw.position += self.writer.amt;
 
         self.raw.push_central_header(
-            &self.file_name,
+            self.file_name,
             &RawMetadata {
                 is_streaming: true,
                 compressed_size,

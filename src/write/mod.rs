@@ -23,9 +23,10 @@ pub struct FileOptions {
 ///
 /// You need to call `self.finish()` when done.
 ///
-/// This type only does minimal validation on the file names for now, so untrusted
-/// input may produce dangerous ZIP archives. This will be improved in a future
-/// version.
+/// When adding a file to the archive, some checks are made to ensure its name
+/// is valid (it is not absolute, does not contain the '\\' character, etc).
+/// Such validation checks may be added in a semver-compatible version if they
+/// may prevent invalid or dangerous archives.
 ///
 /// # Example
 ///

@@ -120,3 +120,29 @@ fn go() {
 fn python() {
     test_one("tests/python.zip");
 }
+
+#[test]
+fn write_invalid_names() {
+    let mut archive = eazip::ArchiveWriter::new(Vec::new());
+    let options = eazip::write::FileOptions::default();
+
+    archive
+        .add_file("hello.txt", std::io::empty(), &options)
+        .unwrap();
+    archive
+        .add_file("hello.txt", std::io::empty(), &options)
+        .unwrap_err();
+
+    archive
+        .add_file("/etc/passwd", std::io::empty(), &options)
+        .unwrap_err();
+    archive
+        .add_file("test/../../../oops", std::io::empty(), &options)
+        .unwrap_err();
+    archive.stream_file("dir\\file.txt", &options).unwrap_err();
+    archive.add_directory("").unwrap_err();
+
+    archive
+        .add_file("still valid", std::io::empty(), &options)
+        .unwrap();
+}
