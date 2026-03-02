@@ -267,12 +267,9 @@ fn check_local_entry(
     let mut local_entry = read_local_header(reader, buf)?;
     entry.data_offset = reader.amt;
 
-    if entry.file_type.is_directory() {
+    if entry.file_type.is_directory() && entry.uncompressed_size != 0 {
         // Directories should always be empty
-        if entry.compression_method != crate::CompressionMethod::STORE || entry.compressed_size != 0
-        {
-            return Err(invalid_entry());
-        }
+        return Err(invalid_entry());
     } else {
         // Skip the compressed file
         reader.advance(entry.compressed_size as _)?;
