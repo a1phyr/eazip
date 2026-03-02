@@ -5,6 +5,33 @@ pub use crc32::{Crc32Checker, Crc32Writer};
 
 use std::{fmt, io, time::SystemTime};
 
+#[must_use]
+pub(crate) fn validate_name(name: &str) -> Option<Box<str>> {
+    if name.starts_with('/')
+        || name.contains('\\')
+        || name.contains('\0')
+        || (cfg!(windows) && name.contains(':'))
+    {
+        return None;
+    }
+
+    let mut dst = String::with_capacity(name.len());
+    for part in name.split_inclusive('/') {
+        match part {
+            // Forbid parent parts as they have weird interactions with symlinks
+            "." | ".." | "../" => return None,
+            "/" | "./" => (),
+            _ => dst.push_str(part),
+        }
+    }
+
+    if dst.is_empty() {
+        return None;
+    }
+
+    Some(dst.into_boxed_str())
+}
+
 /// The type of an entry in an archive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileType {

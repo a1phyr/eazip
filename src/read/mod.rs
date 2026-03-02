@@ -6,10 +6,7 @@ use std::{
     io::{self, BufRead, Read, Seek},
 };
 
-use crate::{
-    CompressionMethod, Decompressor, FileType, types,
-    utils::{Crc32Checker, LengthChecker, Timestamp, cp437},
-};
+use crate::{CompressionMethod, Decompressor, FileType, Timestamp, types, utils};
 
 mod extra_field;
 mod raw;
@@ -194,35 +191,9 @@ fn convert_string(raw: &[u8], force_unicode: bool) -> Option<(Cow<'_, str>, Opti
     if force_unicode {
         None
     } else {
-        let name = cp437::convert(raw);
+        let name = utils::cp437::convert(raw);
         Some((Cow::Owned(name), Some(crc32fast::hash(raw))))
     }
-}
-
-fn check_name(name: &str) -> Option<Box<str>> {
-    if name.starts_with('/')
-        || name.contains('\\')
-        || name.contains('\0')
-        || (cfg!(windows) && name.contains(':'))
-    {
-        return None;
-    }
-
-    let mut dst = String::with_capacity(name.len());
-    for part in name.split_inclusive('/') {
-        match part {
-            // Forbid parent parts as they have weird interactions with symlinks
-            "." | ".." | "../" => return None,
-            "/" | "./" => (),
-            _ => dst.push_str(part),
-        }
-    }
-
-    if dst.is_empty() {
-        return None;
-    }
-
-    Some(dst.into_boxed_str())
 }
 
 /// The metadata of a ZIP entry.
@@ -267,7 +238,7 @@ impl Metadata {
         }
 
         let (name, name_crc) = convert_string(file_name, is_unicode)?;
-        let name = check_name(&name)?;
+        let name = utils::validate_name(&name)?;
 
         let mut meta = Self {
             crc32: header.crc32.get(),
@@ -317,7 +288,7 @@ impl Metadata {
         let (comment, comment_crc) = convert_string(comment, is_unicode)?;
         let comment = comment.into_owned().into_boxed_str();
         let (name, name_crc) = convert_string(file_name, is_unicode)?;
-        let name = check_name(&name)?;
+        let name = utils::validate_name(&name)?;
         let file_type = FileType::test(header.external_attributes.get(), &name)?;
 
         let mut meta = Self {
@@ -381,7 +352,7 @@ impl Metadata {
                     if Some(unicode.header_name_crc32) != name_crc {
                         return None;
                     }
-                    self.name = check_name(unicode.name)?;
+                    self.name = utils::validate_name(unicode.name)?;
                 }
 
                 ExtraField::Ntfs(ntfs) => {
@@ -472,7 +443,7 @@ impl Metadata {
         }
 
         // Check CRC beforehand. Length has already been checked.
-        let mut checker = Crc32Checker::new(self.read_raw(&mut reader)?, self.crc32);
+        let mut checker = utils::Crc32Checker::new(self.read_raw(&mut reader)?, self.crc32);
         std::io::copy(&mut checker, &mut io::sink())?;
 
         self.read_raw(reader)
@@ -491,8 +462,8 @@ impl Metadata {
     /// It is particularly  useful in combinaison of `read_raw`.
     #[inline]
     pub fn content_checker<R: Read>(&self, reader: R) -> impl Read + use<R> {
-        Crc32Checker::new(
-            LengthChecker::new(reader, self.uncompressed_size),
+        utils::Crc32Checker::new(
+            utils::LengthChecker::new(reader, self.uncompressed_size),
             self.crc32,
         )
     }
