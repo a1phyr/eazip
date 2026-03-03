@@ -32,6 +32,26 @@ pub(crate) fn validate_name(name: &str) -> Option<Box<str>> {
     Some(dst.into_boxed_str())
 }
 
+pub(crate) fn validate_symlink(name: &str, target: &str) -> bool {
+    if target.starts_with('/') || target.contains('\\') || (cfg!(windows) && target.contains(':')) {
+        return false;
+    }
+
+    let mut depth = name.split('/').count() - 1;
+    for part in target.split('/') {
+        match part {
+            "." => (),
+            ".." => match depth.checked_sub(1) {
+                Some(d) => depth = d,
+                None => return false,
+            },
+            _ => depth += 1,
+        }
+    }
+
+    true
+}
+
 /// The type of an entry in an archive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileType {
@@ -247,4 +267,13 @@ impl<R: io::Read> io::Read for LengthChecker<R> {
 
         Reader(self).read_to_string(buf)
     }
+}
+
+#[test]
+fn symlink_validation() {
+    assert!(validate_symlink("a/b", "../c"));
+    assert!(!validate_symlink("a/b", "../../c"));
+    assert!(!validate_symlink("a/b", "/c"));
+    #[cfg(windows)]
+    assert!(!validate_symlink("a/b", "C:/e"));
 }

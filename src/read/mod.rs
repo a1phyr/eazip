@@ -28,26 +28,6 @@ fn compressed() -> io::Error {
     io::Error::new(io::ErrorKind::Unsupported, "compressed file")
 }
 
-fn validate_symlink(name: &str, target: &str) -> bool {
-    if target.starts_with('/') || target.contains('\\') || (cfg!(windows) && target.contains(':')) {
-        return false;
-    }
-
-    let mut depth = name.split('/').count() - 1;
-    for part in target.split('/') {
-        match part {
-            "." => (),
-            ".." => match depth.checked_sub(1) {
-                Some(d) => depth = d,
-                None => return false,
-            },
-            _ => depth += 1,
-        }
-    }
-
-    true
-}
-
 trait ReadSeek: Read + Seek {}
 impl<R: Read + Seek> ReadSeek for R {}
 
@@ -500,7 +480,7 @@ impl Metadata {
             }
             FileType::Symlink => {
                 let target = io::read_to_string(self.read(reader)?)?;
-                if !validate_symlink(&self.name, &target) {
+                if !utils::validate_symlink(&self.name, &target) {
                     return Err(invalid("invalid symlink target"));
                 }
 
@@ -727,13 +707,4 @@ impl<'a, R: BufRead + Seek> File<'a, R> {
     pub fn into_reader(self) -> &'a mut R {
         self.reader
     }
-}
-
-#[test]
-fn symlink_validation() {
-    assert!(validate_symlink("a/b", "../c"));
-    assert!(!validate_symlink("a/b", "../../c"));
-    assert!(!validate_symlink("a/b", "/c"));
-    #[cfg(windows)]
-    assert!(!validate_symlink("a/b", "C:/e"));
 }
