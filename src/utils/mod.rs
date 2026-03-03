@@ -33,19 +33,26 @@ pub(crate) fn validate_name(name: &str) -> Option<Box<str>> {
 }
 
 pub(crate) fn validate_symlink(name: &str, target: &str) -> bool {
-    if target.starts_with('/') || target.contains('\\') || (cfg!(windows) && target.contains(':')) {
+    if target.starts_with('/')
+        || target.contains('\\')
+        || target.contains('\0')
+        || (cfg!(windows) && target.contains(':'))
+    {
         return false;
     }
 
-    let mut depth = name.split('/').count() - 1;
+    let mut depth = Some(name.split('/').count() - 1);
+
     for part in target.split('/') {
         match part {
-            "." => (),
-            ".." => match depth.checked_sub(1) {
-                Some(d) => depth = d,
+            "" | "." => (),
+            ".." => match depth.and_then(|d| d.checked_sub(1)) {
+                Some(d) => depth = Some(d),
                 None => return false,
             },
-            _ => depth += 1,
+            // Once the link goes down, forbid it going up again (eg "a/../b")
+            // to prevent it using another link as a "trampoline" to escape.
+            _ => depth = None,
         }
     }
 
@@ -274,6 +281,8 @@ fn symlink_validation() {
     assert!(validate_symlink("a/b", "../c"));
     assert!(!validate_symlink("a/b", "../../c"));
     assert!(!validate_symlink("a/b", "/c"));
+    assert!(!validate_symlink("a/b", ".//////../../c"));
+    assert!(!validate_symlink("a/b", "a/../c"));
     #[cfg(windows)]
     assert!(!validate_symlink("a/b", "C:/e"));
 }
