@@ -314,6 +314,16 @@ impl<W: io::Write> io::Write for Compressor<W> {
         }
     }
 
+    fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        match &mut self.0 {
+            CompressorImpl::Store(w) => w.write_vectored(bufs),
+            #[cfg(feature = "deflate")]
+            CompressorImpl::Deflate(w) => w.write_vectored(bufs),
+            #[cfg(feature = "zstd")]
+            CompressorImpl::Zstd(w) => w.write_vectored(bufs),
+        }
+    }
+
     fn flush(&mut self) -> io::Result<()> {
         match &mut self.0 {
             CompressorImpl::Store(w) => w.flush(),

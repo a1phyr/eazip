@@ -97,6 +97,23 @@ impl<W: Write> Write for Crc32Writer<W> {
         Ok(n)
     }
 
+    fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        let n = self.writer.write_vectored(bufs)?;
+
+        let mut left = n;
+        for buf in bufs {
+            if left == 0 {
+                break;
+            }
+            let size = std::cmp::min(left, buf.len());
+            self.hasher.update(&buf[..size]);
+            left -= size;
+        }
+
+        assert!(left == 0);
+        Ok(n)
+    }
+
     #[inline]
     fn flush(&mut self) -> io::Result<()> {
         self.writer.flush()

@@ -203,6 +203,12 @@ impl<W: io::Write> io::Write for Counter<W> {
         Ok(n)
     }
 
+    fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        let n = self.inner.write_vectored(bufs)?;
+        self.amt += n as u64;
+        Ok(n)
+    }
+
     #[inline]
     fn flush(&mut self) -> io::Result<()> {
         self.inner.flush()

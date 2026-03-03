@@ -237,6 +237,11 @@ impl<W: io::Write> io::Write for FileStreamer<'_, W> {
     }
 
     #[inline]
+    fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        self.writer.write_vectored(bufs)
+    }
+
+    #[inline]
     fn flush(&mut self) -> io::Result<()> {
         self.writer.flush()
     }
