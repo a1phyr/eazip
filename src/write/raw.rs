@@ -82,16 +82,18 @@ impl fmt::Debug for RawArchiveWriter {
 
 impl RawArchiveWriter {
     #[inline]
-    fn check_state(&self) -> io::Result<()> {
+    fn start_writing(&mut self) -> io::Result<()> {
         #[cold]
         fn error() -> io::Error {
             io::Error::other("A non-recoverable error occurred or a file was not `finish`ed")
         }
 
-        match self.state {
-            State::Default => Ok(()),
-            State::Writing(_) => Err(error()),
+        if let State::Writing(_) = self.state {
+            return Err(error());
         }
+        self.state = State::Writing(self.position);
+
+        Ok(())
     }
 
     pub fn recover<W: io::Seek>(&mut self, mut writer: W) -> io::Result<()> {
@@ -129,10 +131,9 @@ impl RawArchiveWriter {
         content: &[u8],
         meta: Metadata,
     ) -> io::Result<()> {
-        self.check_state()?;
         let name = self.check_name(name)?;
-        self.state = State::Writing(self.position);
 
+        self.start_writing()?;
         let mut counter = Counter::new(writer);
 
         let meta = RawMetadata {
@@ -157,12 +158,11 @@ impl RawArchiveWriter {
         name: &str,
         options: &super::FileOptions,
     ) -> io::Result<RawFileStreamer<'_, W>> {
+        let file_name = self.check_name(name)?;
+
+        self.start_writing()?;
         let local_header_offset = self.position;
         let mut writer = Counter::new(writer);
-
-        self.check_state()?;
-        let file_name = self.check_name(name)?;
-        self.state = State::Writing(self.position);
 
         self.write_local_header(
             &mut writer,
@@ -286,8 +286,8 @@ impl RawArchiveWriter {
         Ok(())
     }
 
-    pub fn finish<W: Write>(self, writer: &mut W) -> io::Result<()> {
-        self.check_state()?;
+    pub fn finish<W: Write>(mut self, writer: &mut W) -> io::Result<()> {
+        self.start_writing()?;
 
         let central_directory_offset = self.position;
 
