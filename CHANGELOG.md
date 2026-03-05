@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.3
+
+- Improve validation checks when reading.
+- Fix `creation_time` and `access_time` sometimes missing in `Metadata`.
+- Use vectored IO where possible when writing.
+- Specialize `write_vectored` methods for `Compressor` and `FileStreamer`.
+- Validate and canonicalize file names when writing.
+- Add `get_ref` method to `Compressor` and `Decompressor`.
+- Implement common traits for `Timestamp`
+- Implement `Debug` for all public types
+
 ## 0.2.2
 
 - Add `Archive::open_parallel` to easily open files for `parallel_extract`
