@@ -13,6 +13,30 @@ trait WriteExt: Write {
     fn write_pod<T: Pod>(&mut self, data: &T) -> io::Result<()> {
         self.write_all(data.as_bytes())
     }
+
+    #[inline]
+    fn write_all_many<const N: usize>(&mut self, data: [&[u8]; N]) -> io::Result<()> {
+        self._write_all_many(&mut data.map(io::IoSlice::new))
+    }
+
+    fn _write_all_many(&mut self, mut bufs: &mut [io::IoSlice]) -> io::Result<()> {
+        #[cold]
+        fn write_zero() -> io::Error {
+            io::Error::new(io::ErrorKind::WriteZero, "failed to write whole buffer")
+        }
+
+        io::IoSlice::advance_slices(&mut bufs, 0);
+        while !bufs.is_empty() {
+            match self.write_vectored(bufs) {
+                Ok(0) => return Err(write_zero()),
+                Ok(n) => io::IoSlice::advance_slices(&mut bufs, n),
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl<W: Write> WriteExt for W {}
@@ -206,22 +230,24 @@ impl RawArchiveWriter {
 
         let stream_flag = if meta.is_streaming { 1 << 3 } else { 0 };
 
-        writer.write_pod(&types::LocalFileHeader {
-            signature: types::LocalFileHeader::SIGNATURE,
-            required_version: types::U16::set(45),
-            flags: types::U16::set((1 << 11) | stream_flag),
-            compression_method: types::U16::set(meta.meta.compression_method.0),
-            last_modified_time: types::U16::set(0),
-            last_modified_date: types::U16::set(0),
-            crc32: types::U32::set(meta.meta.crc32),
-            compressed_size: types::U32::set(0xffff_ffff),
-            uncompressed_size: types::U32::set(0xffff_ffff),
-            file_name_length: types::U16::set(name.len() as u16),
-            extra_fields_length: types::U16::set(size_of::<LocalZip64>() as _),
-        })?;
-
-        writer.write_all(name.as_bytes())?;
-        writer.write_all(zip64.as_bytes())?;
+        writer.write_all_many([
+            types::LocalFileHeader {
+                signature: types::LocalFileHeader::SIGNATURE,
+                required_version: types::U16::set(45),
+                flags: types::U16::set((1 << 11) | stream_flag),
+                compression_method: types::U16::set(meta.meta.compression_method.0),
+                last_modified_time: types::U16::set(0),
+                last_modified_date: types::U16::set(0),
+                crc32: types::U32::set(meta.meta.crc32),
+                compressed_size: types::U32::set(0xffff_ffff),
+                uncompressed_size: types::U32::set(0xffff_ffff),
+                file_name_length: types::U16::set(name.len() as u16),
+                extra_fields_length: types::U16::set(size_of::<LocalZip64>() as _),
+            }
+            .as_bytes(),
+            name.as_bytes(),
+            zip64.as_bytes(),
+        ])?;
 
         Ok(())
     }
@@ -291,43 +317,45 @@ impl RawArchiveWriter {
 
         let central_directory_offset = self.position;
 
-        writer.write_all(&self.central_headers)?;
-
         let central_directory_size = self.central_headers.len() as u64;
         let central_directory_64_offset = central_directory_offset + central_directory_size;
 
         let total_entries = types::U64::set(self.entries.len() as u64);
 
-        writer.write_pod(&types::EndOfCentralDirectory64 {
-            signature: types::EndOfCentralDirectory64::SIGNATURE,
-            record_size: types::U64::set(44),
-            made_by: types::U16::set(0x0300),    // Unix
-            version_needed: types::U16::set(45), // Version 4.5 for Zip64 support
-            disk_number: types::U32::set(0),
-            disk_with_central_directory: types::U32::set(0),
-            entries_on_this_disk: total_entries,
-            total_entries,
-            central_directory_size: types::U64::set(central_directory_size),
-            central_directory_offset: types::U64::set(central_directory_offset),
-        })?;
-
-        writer.write_pod(&types::EndOfCentralDirectory64Locator {
-            signature: types::EndOfCentralDirectory64Locator::SIGNATURE,
-            disk_with_central_directory: types::U32::set(0),
-            central_directory_64_offset: types::U64::set(central_directory_64_offset),
-            total_disks: types::U32::set(1),
-        })?;
-
-        writer.write_pod(&types::EndOfCentralDirectory {
-            signature: types::EndOfCentralDirectory::SIGNATURE,
-            disk_number: types::U16::set(0),
-            disk_with_central_directory: types::U16::set(0),
-            entries_on_this_disk: types::U16::set(0xffff),
-            total_entries: types::U16::set(0xffff),
-            central_directory_size: types::U32::set(0xffff_ffff),
-            central_directory_offset: types::U32::set(0xffff_ffff),
-            comment_length: types::U16::set(0),
-        })?;
+        writer.write_all_many([
+            &self.central_headers,
+            types::EndOfCentralDirectory64 {
+                signature: types::EndOfCentralDirectory64::SIGNATURE,
+                record_size: types::U64::set(44),
+                made_by: types::U16::set(0x0300),    // Unix
+                version_needed: types::U16::set(45), // Version 4.5 for Zip64 support
+                disk_number: types::U32::set(0),
+                disk_with_central_directory: types::U32::set(0),
+                entries_on_this_disk: total_entries,
+                total_entries,
+                central_directory_size: types::U64::set(central_directory_size),
+                central_directory_offset: types::U64::set(central_directory_offset),
+            }
+            .as_bytes(),
+            types::EndOfCentralDirectory64Locator {
+                signature: types::EndOfCentralDirectory64Locator::SIGNATURE,
+                disk_with_central_directory: types::U32::set(0),
+                central_directory_64_offset: types::U64::set(central_directory_64_offset),
+                total_disks: types::U32::set(1),
+            }
+            .as_bytes(),
+            types::EndOfCentralDirectory {
+                signature: types::EndOfCentralDirectory::SIGNATURE,
+                disk_number: types::U16::set(0),
+                disk_with_central_directory: types::U16::set(0),
+                entries_on_this_disk: types::U16::set(0xffff),
+                total_entries: types::U16::set(0xffff),
+                central_directory_size: types::U32::set(0xffff_ffff),
+                central_directory_offset: types::U32::set(0xffff_ffff),
+                comment_length: types::U16::set(0),
+            }
+            .as_bytes(),
+        ])?;
 
         Ok(())
     }
