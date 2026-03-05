@@ -44,10 +44,3 @@ println!("Content of hello.txt: {content}");
   By default, this library only supports deflate (because it is everywhere) and zstd (because it is good).
 - Non-unicode file names. Those are rare, weird and non-portable. Please fix you files.
 - Manage encrypted files. This crate is not a crypto crate.
-
-## Todo list
-
-- Better validation of file names when writing files.
-- Support of timestamps when writing.
-- Support of all timestamps when reading (extended versions are supported, but not the basic one).
-- More flexible ("raw") writer support.

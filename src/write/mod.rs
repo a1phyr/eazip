@@ -10,6 +10,8 @@ use std::{fmt, io};
 mod raw;
 
 /// The options used when adding a file to an archive.
+///
+/// Setting the timestamp is not implemented yet.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 pub struct FileOptions {
@@ -161,6 +163,10 @@ impl<W: io::Write> ArchiveWriter<W> {
     }
 
     /// Adds a symlink to the archive.
+    ///
+    /// The target of the symlink is not validated yet, which may be used to
+    /// create dangerous archives if used with untrusted input. This will be
+    /// fixed in a future version so this behaviour should not be relied on.
     pub fn add_symlink(&mut self, name: &str, target: &str) -> io::Result<()> {
         self.raw.write_file_raw(
             &mut self.writer,
