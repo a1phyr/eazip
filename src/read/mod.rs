@@ -364,7 +364,7 @@ impl Metadata {
                     self.compression_method = aes.compression;
                 }
 
-                ExtraField::Invalid(_, _) => return None,
+                ExtraField::Invalid => return None,
 
                 _ => (),
             }

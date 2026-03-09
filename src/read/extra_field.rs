@@ -77,13 +77,9 @@ pub struct ExtraFieldIterator<'a>(DataParser<'a>);
 impl<'a> Iterator for ExtraFieldIterator<'a> {
     type Item = ExtraField<'a>;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        let id = self.0.read_u16()?;
-        let len = self.0.read_u16()?;
-
-        let data = self.0.read_variable(len as usize)?;
-
-        Some(ExtraField::parse(id, data))
+        ExtraField::parse(&mut self.0)
     }
 }
 
@@ -97,14 +93,22 @@ pub enum ExtraField<'a> {
     UnixNew(UnixNew<'a>),
     Aes(Aes),
 
-    Invalid(u16, &'a [u8]),
-    Unknown(u16, &'a [u8]),
+    Unknown,
+    Invalid,
 }
 
 impl<'a> ExtraField<'a> {
-    fn parse(id: u16, data: &'a [u8]) -> Self {
+    fn parse(extra_data: &mut DataParser<'a>) -> Option<Self> {
+        // Accept padding null bytes although this is not spec compliant
+        if matches!(extra_data.0, [] | [0] | [0, 0] | [0, 0, 0]) {
+            return None;
+        }
+
         let field = (|| {
-            let data = DataParser(data);
+            let id = extra_data.read_u16()?;
+            let len = extra_data.read_u16()?;
+
+            let data = DataParser(extra_data.read_variable(len as usize)?);
 
             Some(match id {
                 0x0001 => {
@@ -116,11 +120,11 @@ impl<'a> ExtraField<'a> {
                 0x7075 => ExtraField::UnicodeName(UnicodeName::parse(data)?),
                 0x7875 => ExtraField::UnixNew(UnixNew::parse(data)?),
                 0x9901 => ExtraField::Aes(Aes::parse(data)?),
-                _ => ExtraField::Unknown(id, data.0),
+                _ => ExtraField::Unknown,
             })
         })();
 
-        field.unwrap_or(ExtraField::Invalid(id, data))
+        Some(field.unwrap_or(ExtraField::Invalid))
     }
 }
 
