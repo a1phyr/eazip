@@ -76,7 +76,7 @@ pub struct Decompressor<R>(DecompressorImpl<R>);
 
 impl<R: io::BufRead + fmt::Debug> fmt::Debug for Decompressor<R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Deompressor")
+        f.debug_struct("Decompressor")
             .field("method", &self.compression_method())
             .field("reader", &self.get_ref())
             .finish()
