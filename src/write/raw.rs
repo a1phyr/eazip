@@ -263,7 +263,7 @@ impl RawArchiveWriter {
         )?;
         self.entries.try_reserve(1)?;
 
-        debug_assert!(name.len() < u16::MAX as usize);
+        debug_assert!(name.len() <= u16::MAX as usize);
 
         let zip64 = CentralZip64 {
             id: types::U16::set(0x0001),
