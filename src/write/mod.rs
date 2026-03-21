@@ -1,7 +1,7 @@
 //! Utilities to write an archive.
 
 use crate::{
-    CompressionMethod,
+    CompressionMethod, Timestamp,
     compression::Compressor,
     utils::{Counter, Crc32Writer},
 };
@@ -19,6 +19,8 @@ pub struct FileOptions {
     pub compression_method: CompressionMethod,
     /// The compression level.
     pub level: Option<i32>,
+    /// The modification time of the entry.
+    pub modified_at: Timestamp,
 }
 
 /// Wraps a writer to create a ZIP archive.
@@ -113,6 +115,7 @@ impl<W: io::Write> ArchiveWriter<W> {
                 uncompressed_size,
                 crc32,
                 typ: crate::FileType::File,
+                modified_at: options.modified_at,
             },
         )?;
 
@@ -160,6 +163,7 @@ impl<W: io::Write> ArchiveWriter<W> {
                 uncompressed_size: 0,
                 crc32: 0,
                 typ: crate::FileType::Directory,
+                modified_at: Timestamp::UNIX_EPOCH,
             },
         )
     }
@@ -180,6 +184,7 @@ impl<W: io::Write> ArchiveWriter<W> {
                 uncompressed_size: target.len() as _,
                 crc32: crc32fast::hash(target.as_bytes()),
                 typ: crate::FileType::Symlink,
+                modified_at: Timestamp::UNIX_EPOCH,
             },
         )
     }

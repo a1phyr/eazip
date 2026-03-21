@@ -1,5 +1,5 @@
 use crate::{
-    CompressionMethod, FileType,
+    CompressionMethod, FileType, Timestamp,
     types::{self, Pod},
     utils::Counter,
 };
@@ -66,12 +66,39 @@ struct CentralZip64 {
 
 unsafe impl Pod for CentralZip64 {}
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed)]
+struct ExtendedTimestamp {
+    id: types::U16,
+    size: types::U16,
+    flags: u8,
+    timestamp: types::U32,
+}
+
+unsafe impl Pod for ExtendedTimestamp {}
+
+impl ExtendedTimestamp {
+    fn new(modified: Timestamp) -> Option<Self> {
+        match modified.to_unix().try_into() {
+            Ok(t) if t != 0 => Some(ExtendedTimestamp {
+                id: types::U16::set(0x5455),
+                size: types::U16::set(5),
+                flags: 1,
+                timestamp: types::U32::set(t),
+            }),
+            _ => None,
+        }
+    }
+}
+
 pub struct Metadata {
     pub compression_method: CompressionMethod,
     pub compressed_size: u64,
     pub uncompressed_size: u64,
     pub crc32: u32,
     pub typ: FileType,
+    pub modified_at: Timestamp,
 }
 
 #[derive(Debug, Default)]
@@ -186,6 +213,7 @@ impl RawArchiveWriter {
                 uncompressed_size: 0,
                 crc32: 0,
                 typ: FileType::File,
+                modified_at: options.modified_at,
             },
             true,
         )?;
@@ -197,6 +225,7 @@ impl RawArchiveWriter {
             file_name,
             local_header_offset,
             compression_method: options.compression_method,
+            modified_at: options.modified_at,
 
             raw: self,
         })
@@ -216,6 +245,9 @@ impl RawArchiveWriter {
             uncompressed_size: types::U64::set(meta.uncompressed_size),
         };
 
+        let time = ExtendedTimestamp::new(meta.modified_at);
+        let time = time.as_slice().as_bytes();
+
         let stream_flag = if is_streaming { 1 << 3 } else { 0 };
 
         writer.write_all_many([
@@ -230,11 +262,12 @@ impl RawArchiveWriter {
                 compressed_size: types::U32::set(0xffff_ffff),
                 uncompressed_size: types::U32::set(0xffff_ffff),
                 file_name_length: types::U16::set(name.len() as u16),
-                extra_fields_length: types::U16::set(size_of::<LocalZip64>() as _),
+                extra_fields_length: types::U16::set((size_of::<LocalZip64>() + time.len()) as _),
             }
             .as_bytes(),
             name.as_bytes(),
             zip64.as_bytes(),
+            time,
         ])?;
 
         Ok(())
@@ -248,7 +281,10 @@ impl RawArchiveWriter {
         local_header_offset: u64,
     ) -> io::Result<()> {
         self.central_headers.try_reserve(
-            size_of::<types::CentralFileHeader>() + size_of::<CentralZip64>() + name.len(),
+            size_of::<types::CentralFileHeader>()
+                + size_of::<CentralZip64>()
+                + size_of::<ExtendedTimestamp>()
+                + name.len(),
         )?;
         self.entries.try_reserve(1)?;
 
@@ -261,6 +297,9 @@ impl RawArchiveWriter {
             uncompressed_size: types::U64::set(meta.uncompressed_size),
             local_header_offset: types::U64::set(local_header_offset),
         };
+
+        let time = ExtendedTimestamp::new(meta.modified_at);
+        let time = time.as_slice().as_bytes();
 
         let stream_flag = if is_streaming { 1 << 3 } else { 0 };
 
@@ -283,7 +322,7 @@ impl RawArchiveWriter {
                 compressed_size: types::U32::set(0xffff_ffff),
                 uncompressed_size: types::U32::set(0xffff_ffff),
                 file_name_length: types::U16::set(name.len() as _),
-                extra_fields_length: types::U16::set(size_of::<CentralZip64>() as _),
+                extra_fields_length: types::U16::set((size_of::<CentralZip64>() + time.len()) as _),
                 file_comment_length: types::U16::set(0),
                 disk_number: types::U16::set(0),
                 internal_attributes: types::U16::set(1), // "Binary Data" flag
@@ -295,6 +334,7 @@ impl RawArchiveWriter {
 
         self.central_headers.extend_from_slice(name.as_bytes());
         self.central_headers.extend_from_slice(zip64.as_bytes());
+        self.central_headers.extend_from_slice(time);
 
         self.entries.insert(name);
 
@@ -357,6 +397,7 @@ pub struct RawFileStreamer<'a, W: Write> {
     file_name: Box<str>,
     local_header_offset: u64,
     compression_method: CompressionMethod,
+    modified_at: Timestamp,
 
     raw: &'a mut RawArchiveWriter,
 }
@@ -395,6 +436,7 @@ impl<W: Write> RawFileStreamer<'_, W> {
                 uncompressed_size,
                 crc32,
                 typ: FileType::File,
+                modified_at: self.modified_at,
             },
             true,
             self.local_header_offset,

@@ -52,7 +52,7 @@ fn test_one(name: &str) {
 #[test]
 fn self_test() {
     let path = "tests/eazip.zip";
-    let options = eazip::write::FileOptions::default();
+    let mut options = eazip::write::FileOptions::default();
     let data = b"Hello!\n".as_slice();
 
     let mut writer = eazip::ArchiveWriter::new(std::fs::File::create(path).unwrap());
@@ -61,6 +61,7 @@ fn self_test() {
     writer.add_file("hello/hello.txt", data, &options).unwrap();
     writer.add_symlink("hello/symlink", "hello.txt").unwrap();
 
+    options.modified_at = eazip::Timestamp::now();
     let mut file = writer.stream_file("hello/你好.txt", &options).unwrap();
     file.write_all(data).unwrap();
     file.finish().unwrap();
