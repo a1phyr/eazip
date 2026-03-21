@@ -107,8 +107,9 @@ impl<W: io::Write> ArchiveWriter<W> {
             &mut self.writer,
             name,
             &compressed,
-            raw::Metadata {
+            &raw::Metadata {
                 compression_method: options.compression_method,
+                compressed_size: compressed.len() as _,
                 uncompressed_size,
                 crc32,
                 typ: crate::FileType::File,
@@ -153,8 +154,9 @@ impl<W: io::Write> ArchiveWriter<W> {
             &mut self.writer,
             name,
             &[],
-            raw::Metadata {
+            &raw::Metadata {
                 compression_method: CompressionMethod::STORE,
+                compressed_size: 0,
                 uncompressed_size: 0,
                 crc32: 0,
                 typ: crate::FileType::Directory,
@@ -172,8 +174,9 @@ impl<W: io::Write> ArchiveWriter<W> {
             &mut self.writer,
             name,
             target.as_bytes(),
-            raw::Metadata {
+            &raw::Metadata {
                 compression_method: CompressionMethod::STORE,
+                compressed_size: target.len() as _,
                 uncompressed_size: target.len() as _,
                 crc32: crc32fast::hash(target.as_bytes()),
                 typ: crate::FileType::Symlink,

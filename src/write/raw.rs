@@ -68,15 +68,10 @@ unsafe impl Pod for CentralZip64 {}
 
 pub struct Metadata {
     pub compression_method: CompressionMethod,
+    pub compressed_size: u64,
     pub uncompressed_size: u64,
     pub crc32: u32,
     pub typ: FileType,
-}
-
-struct RawMetadata {
-    is_streaming: bool,
-    compressed_size: u64,
-    meta: Metadata,
 }
 
 #[derive(Debug, Default)]
@@ -153,22 +148,16 @@ impl RawArchiveWriter {
         writer: &mut W,
         name: &str,
         content: &[u8],
-        meta: Metadata,
+        meta: &Metadata,
     ) -> io::Result<()> {
         let name = self.check_name(name)?;
 
         self.start_writing()?;
         let mut counter = Counter::new(writer);
 
-        let meta = RawMetadata {
-            is_streaming: false,
-            compressed_size: content.len() as u64,
-            meta,
-        };
-
-        self.write_local_header(&mut counter, &name, &meta)?;
+        self.write_local_header(&mut counter, &name, meta, false)?;
         counter.write_all(content)?;
-        self.push_central_header(name, &meta, self.position)?;
+        self.push_central_header(name, meta, false, self.position)?;
 
         self.position += counter.amt;
         self.state = State::Default;
@@ -191,16 +180,14 @@ impl RawArchiveWriter {
         self.write_local_header(
             &mut writer,
             &file_name,
-            &RawMetadata {
-                is_streaming: true,
+            &Metadata {
+                compression_method: options.compression_method,
                 compressed_size: 0,
-                meta: Metadata {
-                    compression_method: options.compression_method,
-                    uncompressed_size: 0,
-                    crc32: 0,
-                    typ: FileType::File,
-                },
+                uncompressed_size: 0,
+                crc32: 0,
+                typ: FileType::File,
             },
+            true,
         )?;
 
         Ok(RawFileStreamer {
@@ -219,26 +206,27 @@ impl RawArchiveWriter {
         &mut self,
         writer: &mut W,
         name: &str,
-        meta: &RawMetadata,
+        meta: &Metadata,
+        is_streaming: bool,
     ) -> io::Result<()> {
         let zip64 = LocalZip64 {
             id: types::U16::set(0x0001),
             size: types::U16::set(16),
             compressed_size: types::U64::set(meta.compressed_size),
-            uncompressed_size: types::U64::set(meta.meta.uncompressed_size),
+            uncompressed_size: types::U64::set(meta.uncompressed_size),
         };
 
-        let stream_flag = if meta.is_streaming { 1 << 3 } else { 0 };
+        let stream_flag = if is_streaming { 1 << 3 } else { 0 };
 
         writer.write_all_many([
             types::LocalFileHeader {
                 signature: types::LocalFileHeader::SIGNATURE,
                 required_version: types::U16::set(45),
                 flags: types::U16::set((1 << 11) | stream_flag),
-                compression_method: types::U16::set(meta.meta.compression_method.0),
+                compression_method: types::U16::set(meta.compression_method.0),
                 last_modified_time: types::U16::set(0),
                 last_modified_date: types::U16::set(0),
-                crc32: types::U32::set(meta.meta.crc32),
+                crc32: types::U32::set(meta.crc32),
                 compressed_size: types::U32::set(0xffff_ffff),
                 uncompressed_size: types::U32::set(0xffff_ffff),
                 file_name_length: types::U16::set(name.len() as u16),
@@ -255,7 +243,8 @@ impl RawArchiveWriter {
     fn push_central_header(
         &mut self,
         name: Box<str>,
-        meta: &RawMetadata,
+        meta: &Metadata,
+        is_streaming: bool,
         local_header_offset: u64,
     ) -> io::Result<()> {
         self.central_headers.try_reserve(
@@ -269,13 +258,13 @@ impl RawArchiveWriter {
             id: types::U16::set(0x0001),
             size: types::U16::set(24),
             compressed_size: types::U64::set(meta.compressed_size),
-            uncompressed_size: types::U64::set(meta.meta.uncompressed_size),
+            uncompressed_size: types::U64::set(meta.uncompressed_size),
             local_header_offset: types::U64::set(local_header_offset),
         };
 
-        let stream_flag = if meta.is_streaming { 1 << 3 } else { 0 };
+        let stream_flag = if is_streaming { 1 << 3 } else { 0 };
 
-        let attributes = match meta.meta.typ {
+        let attributes = match meta.typ {
             FileType::File => (1 << 5) | (8 << 28),
             FileType::Directory => (1 << 4) | (4 << 28),
             FileType::Symlink => (0o777 << 16) | (10 << 28),
@@ -287,10 +276,10 @@ impl RawArchiveWriter {
                 made_by: types::U16::set(0x0300),    // Unix
                 version_needed: types::U16::set(45), // Version 4.5 for Zip64 support
                 flags: types::U16::set((1 << 11) | stream_flag),
-                compression_method: types::U16::set(meta.meta.compression_method.0),
+                compression_method: types::U16::set(meta.compression_method.0),
                 last_modified_time: types::U16::set(0),
                 last_modified_date: types::U16::set(0),
-                crc32: types::U32::set(meta.meta.crc32),
+                crc32: types::U32::set(meta.crc32),
                 compressed_size: types::U32::set(0xffff_ffff),
                 uncompressed_size: types::U32::set(0xffff_ffff),
                 file_name_length: types::U16::set(name.len() as _),
@@ -400,16 +389,14 @@ impl<W: Write> RawFileStreamer<'_, W> {
 
         self.raw.push_central_header(
             self.file_name,
-            &RawMetadata {
-                is_streaming: true,
+            &Metadata {
+                compression_method: self.compression_method,
                 compressed_size,
-                meta: Metadata {
-                    compression_method: self.compression_method,
-                    uncompressed_size,
-                    crc32,
-                    typ: FileType::File,
-                },
+                uncompressed_size,
+                crc32,
+                typ: FileType::File,
             },
+            true,
             self.local_header_offset,
         )?;
 
