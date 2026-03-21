@@ -97,6 +97,8 @@ impl FileType {
 pub struct Timestamp(u64);
 
 impl Timestamp {
+    pub const UNIX_EPOCH: Self = Self(0);
+
     /// Returns the timestamp corresponding to "now".
     #[inline]
     pub fn now() -> Self {
