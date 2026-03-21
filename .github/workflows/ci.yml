@@ -16,7 +16,7 @@ jobs:
           - windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: rustup toolchain add ${{ matrix.rust }}
       - run: cargo +${{ matrix.rust }} test
 
@@ -24,7 +24,7 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: cargo clippy --no-default-features --features std -- -D warnings
       - run: cargo clippy --all-features -- -D warnings
 
@@ -32,5 +32,5 @@ jobs:
     name: Formatting
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: cargo fmt -- --check
