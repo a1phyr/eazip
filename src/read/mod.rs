@@ -46,6 +46,8 @@ impl<R: BufRead + Seek> BufReadSeek for R {}
 pub enum EncryptionMethod {
     /// Legacy ZipCrypto encryption.
     ZipCrypto,
+    /// PKWARE proprietary "Strong Encryption".
+    StrongEncrytion,
     /// The file is encrypted using AES in CTR mode.
     ///
     /// See [the specification](https://www.winzip.com/en/support/aes-encryption/#file-format1)
@@ -211,6 +213,7 @@ impl Metadata {
         let flags = header.flags.get();
         let is_encrypted = flags & (1 << 0) != 0;
         let is_streaming = flags & (1 << 3) != 0;
+        let strong_encryption = flags & (1 << 6) != 0;
         let is_unicode = flags & (1 << 11) != 0;
 
         if { header.signature } != types::LocalFileHeader::SIGNATURE {
@@ -220,9 +223,16 @@ impl Metadata {
         let (name, name_crc) = convert_string(file_name, is_unicode)?;
         let name = utils::validate_name(&name)?;
 
+        let encryption = match (is_encrypted, strong_encryption) {
+            (false, false) => None,
+            (false, true) => return None,
+            (true, false) => Some(EncryptionMethod::ZipCrypto),
+            (true, true) => Some(EncryptionMethod::StrongEncrytion),
+        };
+
         let mut meta = Self {
             crc32: header.crc32.get(),
-            encryption: is_encrypted.then_some(EncryptionMethod::ZipCrypto),
+            encryption,
             header_offset: 0,
             data_offset: 0,
 
@@ -257,6 +267,7 @@ impl Metadata {
         let flags = header.flags.get();
         let is_encrypted = flags & (1 << 0) != 0;
         let is_streaming = flags & (1 << 3) != 0;
+        let strong_encryption = flags & (1 << 6) != 0;
         let is_unicode = flags & (1 << 11) != 0;
 
         if { header.signature } != types::CentralFileHeader::SIGNATURE
@@ -271,9 +282,16 @@ impl Metadata {
         let name = utils::validate_name(&name)?;
         let file_type = FileType::test(header.external_attributes.get(), &name)?;
 
+        let encryption = match (is_encrypted, strong_encryption) {
+            (false, false) => None,
+            (false, true) => return None,
+            (true, false) => Some(EncryptionMethod::ZipCrypto),
+            (true, true) => Some(EncryptionMethod::StrongEncrytion),
+        };
+
         let mut meta = Self {
             crc32: header.crc32.get(),
-            encryption: is_encrypted.then_some(EncryptionMethod::ZipCrypto),
+            encryption,
             header_offset: header.local_header_offset.get() as u64,
             data_offset: 0,
 
