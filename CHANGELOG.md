@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.4
+
+### Added
+
+- Enable adding a modification timestamp when writing a file to an archive.
+- `Timestamp::UNIX_EPOCH` constant.
+- Detect PKWARE "Strong Encryption" when reading archives. No additional validation is performed on encryption metadata for now.
+- Improve extra fields validation.
+
+### Fixed
+
+- Fix a consistency check on file creation time caused by a bad copy/paste.
+- Fix a debug assertion triggering when writing a file name of length 65535.
+- Fix typo in `Decompressor`'s `Debug` impl
+
 ## 0.2.3
 
 - Improve validation checks when reading.
