@@ -287,7 +287,7 @@ fn check_local_entry(
         || entry.flags != local_entry.flags
         || !opt_eq(&entry.modification_time, &local_entry.modification_time)
         || !opt_eq(&entry.access_time, &local_entry.access_time)
-        || !opt_eq(&entry.creation_time, &local_entry.access_time)
+        || !opt_eq(&entry.creation_time, &local_entry.creation_time)
     {
         return Err(invalid_entry());
     }
