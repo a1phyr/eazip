@@ -20,6 +20,9 @@ pub struct FileOptions {
     /// The compression level.
     pub level: Option<i32>,
     /// The modification time of the entry.
+    ///
+    /// Default value is `Timestamp::UNIX_EPOCH`, which means that this field is
+    /// ignored.
     pub modified_at: Timestamp,
 }
 
