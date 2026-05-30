@@ -8,8 +8,7 @@ use std::{fmt, io, time::SystemTime};
 #[must_use]
 pub(crate) fn validate_name(name: &str) -> Option<Box<str>> {
     if name.starts_with('/')
-        || name.contains('\\')
-        || name.contains('\0')
+        || memchr::memchr2(b'\\', b'\0', name.as_bytes()).is_some()
         || (cfg!(windows) && name.contains(':'))
     {
         return None;
@@ -34,8 +33,7 @@ pub(crate) fn validate_name(name: &str) -> Option<Box<str>> {
 
 pub(crate) fn validate_symlink(name: &str, target: &str) -> bool {
     if target.starts_with('/')
-        || target.contains('\\')
-        || target.contains('\0')
+        || memchr::memchr2(b'\\', b'\0', name.as_bytes()).is_some()
         || (cfg!(windows) && target.contains(':'))
     {
         return false;
