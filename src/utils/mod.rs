@@ -3,7 +3,14 @@ mod crc32;
 
 pub use crc32::{Crc32Checker, Crc32Writer};
 
-use std::{fmt, io, time::SystemTime};
+use hashbrown::HashTable;
+
+use std::{
+    fmt,
+    hash::{BuildHasher, Hash, RandomState},
+    io,
+    time::SystemTime,
+};
 
 #[must_use]
 pub(crate) fn validate_name(name: &str) -> Option<Box<str>> {
@@ -279,6 +286,40 @@ impl<R: io::Read> io::Read for LengthChecker<R> {
         }
 
         Reader(self).read_to_string(buf)
+    }
+}
+
+pub(crate) struct NameTable<T> {
+    table: HashTable<T>,
+    hasher: RandomState,
+}
+
+impl<T> NameTable<T> {
+    pub fn with_capacity(cap: usize) -> Self {
+        Self {
+            table: HashTable::with_capacity(cap),
+            hasher: RandomState::new(),
+        }
+    }
+
+    pub fn get<'a>(&self, name: &[u8], f: impl Fn(&T) -> &'a [u8]) -> Option<&T> {
+        let hash = self.hasher.hash_one(name);
+        self.table.find(hash, |x| f(x) == name)
+    }
+
+    pub fn insert<'a>(&mut self, value: T, f: impl Fn(&T) -> &'a [u8]) -> bool {
+        let name = f(&value);
+        let hash = self.hasher.hash_one(name);
+        let entry = self
+            .table
+            .entry(hash, |x| f(x) == name, |x| self.hasher.hash_one(f(x)));
+        match entry {
+            hashbrown::hash_table::Entry::Occupied(_) => false,
+            hashbrown::hash_table::Entry::Vacant(entry) => {
+                entry.insert(value);
+                true
+            }
+        }
     }
 }
 

@@ -2,7 +2,6 @@
 
 use std::{
     borrow::Cow,
-    collections::HashMap,
     io::{self, BufRead, Read, Seek},
 };
 
@@ -63,10 +62,19 @@ pub enum EncryptionMethod {
 }
 
 /// An open ZIP archive without a reader
-#[derive(Debug)]
 pub struct RawArchive {
     entries: Vec<Metadata>,
+    names: utils::NameTable<usize>,
     comment: Box<[u8]>,
+}
+
+impl std::fmt::Debug for RawArchive {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RawArchive")
+            .field("entries", &self.entries)
+            .field("comment", &String::from_utf8_lossy(&self.comment))
+            .finish()
+    }
 }
 
 impl RawArchive {
@@ -75,8 +83,7 @@ impl RawArchive {
     /// The same reader should be used for other methods.
     #[inline]
     pub fn new<R: Read + Seek>(reader: &mut R) -> io::Result<Self> {
-        let (entries, comment) = raw::read_archive(reader)?;
-        Ok(Self { entries, comment })
+        raw::read_archive(reader)
     }
 
     /// Gets the list of entries in this archive.
@@ -89,6 +96,32 @@ impl RawArchive {
     #[inline]
     pub fn comment(&self) -> &[u8] {
         &self.comment
+    }
+
+    /// Gets a file by its name.
+    #[inline]
+    pub fn get_by_name(&mut self, name: &str) -> Option<&Metadata> {
+        let index = self.index_of(name)?;
+        self.entries.get(index)
+    }
+
+    /// Gets the index of a file in [`Self::entries`] by its name.
+    pub fn index_of(&self, name: &str) -> Option<usize> {
+        let stripped_name = name.strip_suffix('/');
+        let name = stripped_name.unwrap_or(name);
+
+        let index = *self
+            .names
+            .get(name.as_bytes(), |i| self.entries[*i].stripped_name())?;
+
+        // To avoid duplicated names, directory names are stored without a
+        // trailing '/' in the map, but this implementation detail should not
+        // leak.
+        if self.entries[index].file_type.is_directory() != stripped_name.is_some() {
+            return None;
+        }
+
+        Some(index)
     }
 
     /// Extracts the archive to the given directory.
@@ -407,6 +440,10 @@ impl Metadata {
         &self.name
     }
 
+    fn stripped_name(&self) -> &[u8] {
+        self.name.strip_suffix('/').unwrap_or(&self.name).as_bytes()
+    }
+
     /// Gets the comment of this entry.
     #[inline]
     pub fn comment(&self) -> &str {
@@ -546,7 +583,6 @@ impl Metadata {
 #[derive(Debug)]
 pub struct Archive<R> {
     inner: RawArchive,
-    names: HashMap<Box<str>, usize>,
     reader: R,
 }
 
@@ -589,19 +625,7 @@ impl<R: BufRead + Seek> Archive<R> {
     /// through `extract` and `extract_parallel`.
     pub fn new(mut reader: R) -> io::Result<Self> {
         let inner = RawArchive::new(&mut reader)?;
-
-        let names = inner
-            .entries()
-            .iter()
-            .enumerate()
-            .map(|(i, meta)| (meta.name().into(), i))
-            .collect();
-
-        Ok(Self {
-            inner,
-            names,
-            reader,
-        })
+        Ok(Self { inner, reader })
     }
 
     /// Gets the list of entries in the archive.
@@ -622,13 +646,13 @@ impl<R: BufRead + Seek> Archive<R> {
 
     /// Gets a file by its name.
     pub fn get_by_name(&mut self, name: &str) -> Option<File<'_, R>> {
-        let index = *self.names.get(name)?;
+        let index = self.index_of(name)?;
         self.get_by_index(index)
     }
 
     /// Gets the index of a file in [`Self::entries`] by its name.
     pub fn index_of(&self, name: &str) -> Option<usize> {
-        self.names.get(name).copied()
+        self.inner.index_of(name)
     }
 
     /// Gets the comment of the archive.

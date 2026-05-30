@@ -359,7 +359,7 @@ fn read_central_directory(
     Ok(entries)
 }
 
-pub(crate) fn read_archive(reader: &mut dyn ReadSeek) -> io::Result<(Vec<Metadata>, Box<[u8]>)> {
+pub(crate) fn read_archive(reader: &mut dyn ReadSeek) -> io::Result<super::RawArchive> {
     let (offset, dir_end, comment) = find_eocd(reader)?;
 
     if dir_end.comment_length.get() as usize != comment.len() {
@@ -371,13 +371,16 @@ pub(crate) fn read_archive(reader: &mut dyn ReadSeek) -> io::Result<(Vec<Metadat
 
     let entries = read_central_directory(reader, central_dir.offset, central_dir.entries)?;
 
-    let mut names = std::collections::HashSet::with_capacity(entries.len());
-    for entry in &entries {
-        let name = entry.name.strip_suffix('/').unwrap_or(&entry.name);
-        if !names.insert(name) {
+    let mut names = crate::utils::NameTable::with_capacity(entries.len());
+    for i in 0..entries.iter().len() {
+        if !names.insert(i, |i| entries[*i].stripped_name()) {
             return Err(super::invalid("duplicated name in archive"));
         }
     }
 
-    Ok((entries, comment))
+    Ok(super::RawArchive {
+        entries,
+        names,
+        comment,
+    })
 }
