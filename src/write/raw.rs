@@ -1,7 +1,7 @@
 use crate::{
     CompressionMethod, FileType, Timestamp,
     types::{self, Pod},
-    utils::Counter,
+    utils,
 };
 use std::{
     collections::HashSet,
@@ -168,11 +168,14 @@ impl RawArchiveWriter {
             (true, false) => return Err(invalid_name("file name must not end with '/'")),
             _ => (),
         }
-        if self.entries.contains(name) {
+
+        let name = utils::validate_name(name).ok_or_else(|| invalid_name("invalid file name"))?;
+
+        if self.entries.contains(&name) {
             return Err(invalid_name("duplicated file name"));
         }
 
-        crate::utils::validate_name(name).ok_or_else(|| invalid_name("invalid file name"))
+        Ok(name)
     }
 
     pub fn write_file_raw<W: Write>(
@@ -185,7 +188,7 @@ impl RawArchiveWriter {
         let name = self.check_name(name, meta.typ)?;
 
         self.start_writing()?;
-        let mut counter = Counter::new(writer);
+        let mut counter = utils::Counter::new(writer);
 
         self.write_local_header(&mut counter, &name, meta, false)?;
         counter.write_all(content)?;
@@ -207,7 +210,7 @@ impl RawArchiveWriter {
 
         self.start_writing()?;
         let local_header_offset = self.position;
-        let mut writer = Counter::new(writer);
+        let mut writer = utils::Counter::new(writer);
 
         self.write_local_header(
             &mut writer,
@@ -397,7 +400,7 @@ impl RawArchiveWriter {
 
 pub struct RawFileStreamer<'a, W: Write> {
     started_at: u64,
-    writer: Counter<W>,
+    writer: utils::Counter<W>,
 
     file_name: Box<str>,
     local_header_offset: u64,
