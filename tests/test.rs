@@ -128,20 +128,34 @@ fn write_invalid_names() {
     let options = eazip::write::FileOptions::default();
 
     archive
-        .add_file("hello.txt", std::io::empty(), &options)
-        .unwrap();
-    archive
-        .add_file("hello.txt", std::io::empty(), &options)
+        .add_file("trailing slash/", std::io::empty(), &options)
         .unwrap_err();
 
     archive
-        .add_file("/etc/passwd", std::io::empty(), &options)
+        .add_file("duplicated", std::io::empty(), &options)
+        .unwrap();
+    archive
+        .add_file("duplicated", std::io::empty(), &options)
         .unwrap_err();
+
+    archive
+        .add_file("/absolute", std::io::empty(), &options)
+        .unwrap_err();
+    if cfg!(windows) {
+        archive
+            .add_file("C:/absolute", std::io::empty(), &options)
+            .unwrap_err();
+    }
+
     archive
         .add_file("test/../../../oops", std::io::empty(), &options)
         .unwrap_err();
     archive.stream_file("dir\\file.txt", &options).unwrap_err();
-    archive.add_directory("").unwrap_err();
+    archive
+        .add_file("", std::io::empty(), &options)
+        .unwrap_err();
+
+    archive.add_directory("no trailing slash").unwrap_err();
 
     archive
         .add_file("still valid", std::io::empty(), &options)

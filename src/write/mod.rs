@@ -149,13 +149,6 @@ impl<W: io::Write> ArchiveWriter<W> {
 
     /// Adds a directory to the archive.
     pub fn add_directory(&mut self, name: &str) -> io::Result<()> {
-        if !name.ends_with('/') {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "directory name must end with '/'",
-            ));
-        }
-
         self.raw.write_file_raw(
             &mut self.writer,
             name,

@@ -154,7 +154,7 @@ impl RawArchiveWriter {
         Ok(())
     }
 
-    fn check_name(&self, name: &str) -> io::Result<Box<str>> {
+    fn check_name(&self, name: &str, typ: FileType) -> io::Result<Box<str>> {
         #[cold]
         fn invalid_name(msg: &str) -> io::Error {
             io::Error::new(io::ErrorKind::InvalidInput, msg)
@@ -162,6 +162,11 @@ impl RawArchiveWriter {
 
         if u16::try_from(name.len()).is_err() {
             return Err(invalid_name("file name too long"));
+        }
+        match (name.ends_with('/'), typ.is_directory()) {
+            (false, true) => return Err(invalid_name("directory name must end with '/'")),
+            (true, false) => return Err(invalid_name("file name must not end with '/'")),
+            _ => (),
         }
         if self.entries.contains(name) {
             return Err(invalid_name("duplicated file name"));
@@ -177,7 +182,7 @@ impl RawArchiveWriter {
         content: &[u8],
         meta: &Metadata,
     ) -> io::Result<()> {
-        let name = self.check_name(name)?;
+        let name = self.check_name(name, meta.typ)?;
 
         self.start_writing()?;
         let mut counter = Counter::new(writer);
@@ -198,7 +203,7 @@ impl RawArchiveWriter {
         name: &str,
         options: &super::FileOptions,
     ) -> io::Result<RawFileStreamer<'_, W>> {
-        let file_name = self.check_name(name)?;
+        let file_name = self.check_name(name, FileType::File)?;
 
         self.start_writing()?;
         let local_header_offset = self.position;
