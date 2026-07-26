@@ -10,7 +10,7 @@
 //! "technically valid" ZIP files. If your ZIP file does not validate but you
 //! think it should, feel free to file an issue.
 //!
-//! See [`Archive`] for reading archives and [`ArchiveWriter`] for creating ones.
+//! See [`ArchiveReader`] for reading archives and [`ArchiveWriter`] for creating ones.
 //!
 //! # Cargo features
 //!
@@ -25,7 +25,7 @@
 //! use std::io;
 //!
 //! // Open a ZIP archive from a file path
-//! let mut archive = eazip::Archive::open("example.zip")?;
+//! let mut archive = eazip::ArchiveReader::open("example.zip")?;
 //!
 //! // Print some metadata for every entry in the archive
 //! for entry in archive.entries() {
@@ -53,6 +53,6 @@ mod utils;
 pub mod write;
 
 pub use compression::{CompressionMethod, Compressor, Decompressor};
-pub use read::Archive;
+pub use read::{Archive, ArchiveReader};
 pub use utils::{FileType, Timestamp};
 pub use write::ArchiveWriter;

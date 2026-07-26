@@ -568,7 +568,7 @@ impl Metadata {
 /// Print the name and content of each file in the archive:
 ///
 /// ```no_run
-/// let mut archive = eazip::Archive::open("example.zip")?;
+/// let mut archive = eazip::ArchiveReader::open("example.zip")?;
 ///
 /// for i in 0..archive.entries().len() {
 ///     let mut entry = archive.get_by_index(i).unwrap();
@@ -581,12 +581,12 @@ impl Metadata {
 /// # Ok::<(), std::io::Error>(())
 /// ```
 #[derive(Debug)]
-pub struct Archive<R> {
+pub struct ArchiveReader<R> {
     inner: RawArchive,
     reader: R,
 }
 
-impl Archive<io::BufReader<std::fs::File>> {
+impl ArchiveReader<io::BufReader<std::fs::File>> {
     /// Opens the given file as a ZIP archive.
     #[inline]
     pub fn open(path: impl AsRef<std::path::Path>) -> io::Result<Self> {
@@ -599,7 +599,7 @@ impl Archive<io::BufReader<std::fs::File>> {
 }
 
 #[cfg(feature = "parallel")]
-impl Archive<io::BufReader<sync_file::SyncFile>> {
+impl ArchiveReader<io::BufReader<sync_file::SyncFile>> {
     /// Opens the given file as a ZIP archive ready for parallel extract.
     #[inline]
     pub fn open_parallel(path: impl AsRef<std::path::Path>) -> io::Result<Self> {
@@ -611,7 +611,7 @@ impl Archive<io::BufReader<sync_file::SyncFile>> {
     }
 }
 
-impl<R: Read + Seek> Archive<R> {
+impl<R: Read + Seek> ArchiveReader<R> {
     /// Opens a ZIP archive from a reader.
     ///
     /// This also perform many validation checks on the archive to make sure
@@ -700,6 +700,9 @@ impl<R: Read + Seek> Archive<R> {
     }
 }
 
+/// Type alias to [`ArchiveReader`] for compatibility.
+pub type Archive<R> = ArchiveReader<R>;
+
 /// A file in a ZIP archive.
 #[derive(Debug)]
 pub struct File<'a, R> {
@@ -710,8 +713,8 @@ pub struct File<'a, R> {
 impl<'a, R: Read + Seek> File<'a, R> {
     /// Gets the metadata of the file.
     ///
-    /// The lifetime of the returned reference is bound to the `Archive`, so it
-    /// can outlive `self`.
+    /// The lifetime of the returned reference is bound to the `ArchiveReader`,
+    /// so it can outlive `self`.
     #[inline]
     pub fn metadata(&self) -> &'a Metadata {
         self.metadata

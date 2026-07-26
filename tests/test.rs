@@ -2,7 +2,7 @@ use eazip::{CompressionMethod, FileType};
 use std::io::Write;
 
 fn test_one(name: &str) {
-    let mut ar = eazip::Archive::open(name).unwrap();
+    let mut ar = eazip::ArchiveReader::open(name).unwrap();
 
     let expected_len = match name {
         // Windows 10 does not encode directories nor support chinese characters
