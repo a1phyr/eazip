@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.5
+
+### Added
+
+- Add `get_by_name` and `index_of` methods to `RawArchive`. This comes at no performance cost but a slight memory one.
+- Rename `Archive` type to `ArchiveReader` and add a type alias for compatibility. This is in prevision to the rename that will come in a future breaking version.
+
+### Changed
+
+- Relax some `BufRead` bounds on `Archive` and `File`
+- Use `hashbrown` to significantly improve performance and reduce memory usage.
+
+### Fixed
+
+- Check that file names don't end with a slash when writing.
+- Canonicalize file names before checking duplicates when writing.
+
 ## 0.2.4
 
 ### Added
