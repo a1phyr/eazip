@@ -611,7 +611,7 @@ impl Archive<io::BufReader<sync_file::SyncFile>> {
     }
 }
 
-impl<R: BufRead + Seek> Archive<R> {
+impl<R: Read + Seek> Archive<R> {
     /// Opens a ZIP archive from a reader.
     ///
     /// This also perform many validation checks on the archive to make sure
@@ -665,7 +665,10 @@ impl<R: BufRead + Seek> Archive<R> {
     ///
     /// The directory will be created if needed, but *not* its parent.
     #[inline]
-    pub fn extract(&mut self, at: impl AsRef<std::path::Path>) -> io::Result<()> {
+    pub fn extract(&mut self, at: impl AsRef<std::path::Path>) -> io::Result<()>
+    where
+        R: BufRead,
+    {
         self.inner.extract(&mut self.reader, at.as_ref())
     }
 
@@ -704,7 +707,7 @@ pub struct File<'a, R> {
     reader: &'a mut R,
 }
 
-impl<'a, R: BufRead + Seek> File<'a, R> {
+impl<'a, R: Read + Seek> File<'a, R> {
     /// Gets the metadata of the file.
     ///
     /// The lifetime of the returned reference is bound to the `Archive`, so it
@@ -718,7 +721,10 @@ impl<'a, R: BufRead + Seek> File<'a, R> {
     ///
     /// Unsupported compression methods will return an error.
     #[inline]
-    pub fn read(&mut self) -> io::Result<impl Read + '_> {
+    pub fn read(&mut self) -> io::Result<impl Read + '_>
+    where
+        R: BufRead,
+    {
         self.metadata.read(&mut *self.reader)
     }
 
