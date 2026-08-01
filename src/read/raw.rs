@@ -327,7 +327,7 @@ fn read_central_directory(
 
     // FIXME: change to `try_with_capacity` once it is stable.
     let mut entries = Vec::new();
-    entries.try_reserve_exact(len)?;
+    entries.try_reserve(len)?;
 
     reader.seek(io::SeekFrom::Start(offset))?;
     let mut buf = Vec::new();
