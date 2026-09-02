@@ -120,6 +120,7 @@ impl<W: io::Write> ArchiveWriter<W> {
                 typ: crate::FileType::File,
                 modified_at: options.modified_at,
             },
+            "",
         )?;
 
         Ok(())
@@ -161,6 +162,7 @@ impl<W: io::Write> ArchiveWriter<W> {
                 typ: crate::FileType::Directory,
                 modified_at: Timestamp::UNIX_EPOCH,
             },
+            "",
         )
     }
 
@@ -182,6 +184,7 @@ impl<W: io::Write> ArchiveWriter<W> {
                 typ: crate::FileType::Symlink,
                 modified_at: Timestamp::UNIX_EPOCH,
             },
+            "",
         )
     }
 
@@ -260,12 +263,17 @@ impl<W: io::Write> io::Write for FileStreamer<'_, W> {
 impl<W: io::Write> FileStreamer<'_, W> {
     /// Finishes writing the current file.
     pub fn finish(self) -> io::Result<()> {
+        self.finish_with_comment("")
+    }
+
+    /// Finishes writing the current file.
+    pub fn finish_with_comment(self, comment: &str) -> io::Result<()> {
         let uncompressed_size = self.writer.amt;
         let crc32 = self.writer.inner.result();
 
         let raw_writer = self.writer.inner.into_inner().finish()?;
 
-        raw_writer.finish(uncompressed_size, crc32)
+        raw_writer.finish(uncompressed_size, crc32, comment)
     }
 }
 

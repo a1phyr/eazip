@@ -192,6 +192,7 @@ impl RawArchiveWriter {
         name: &str,
         content: &[u8],
         meta: &Metadata,
+        comment: &str,
     ) -> io::Result<()> {
         let name = self.check_name(name, meta.typ)?;
 
@@ -200,7 +201,7 @@ impl RawArchiveWriter {
 
         self.write_local_header(&mut counter, &name, meta, false)?;
         counter.write_all(content)?;
-        self.push_central_header(name, meta, false, self.position)?;
+        self.push_central_header(name, meta, comment, false, self.position)?;
 
         self.position += counter.amt;
         self.state = State::Default;
@@ -294,14 +295,23 @@ impl RawArchiveWriter {
         &mut self,
         name: Box<str>,
         meta: &Metadata,
+        comment: &str,
         is_streaming: bool,
         local_header_offset: u64,
     ) -> io::Result<()> {
+        let Ok(comment_len) = comment.len().try_into() else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "comment too long",
+            ));
+        };
+
         self.central_headers.try_reserve(
             size_of::<types::CentralFileHeader>()
                 + size_of::<CentralZip64>()
                 + size_of::<ExtendedTimestamp>()
-                + name.len(),
+                + name.len()
+                + comment.len(),
         )?;
         self.entries
             .try_reserve(1, get_name(&self.central_headers))?;
@@ -341,7 +351,7 @@ impl RawArchiveWriter {
                 uncompressed_size: types::U32::set(0xffff_ffff),
                 file_name_length: types::U16::set(name.len() as _),
                 extra_fields_length: types::U16::set((size_of::<CentralZip64>() + time.len()) as _),
-                file_comment_length: types::U16::set(0),
+                file_comment_length: types::U16::set(comment_len),
                 disk_number: types::U16::set(0),
                 internal_attributes: types::U16::set(1), // "Binary Data" flag
                 external_attributes: types::U32::set(attributes),
@@ -356,6 +366,7 @@ impl RawArchiveWriter {
         self.central_headers.extend_from_slice(name.as_bytes());
         self.central_headers.extend_from_slice(zip64.as_bytes());
         self.central_headers.extend_from_slice(time);
+        self.central_headers.extend_from_slice(comment.as_bytes());
 
         self.entries
             .insert((name_start, name_end), get_name(&self.central_headers));
@@ -439,7 +450,7 @@ impl<W: Write> Write for RawFileStreamer<'_, W> {
 }
 
 impl<W: Write> RawFileStreamer<'_, W> {
-    pub fn finish(mut self, uncompressed_size: u64, crc32: u32) -> io::Result<()> {
+    pub fn finish(mut self, uncompressed_size: u64, crc32: u32, comment: &str) -> io::Result<()> {
         let compressed_size = self.writer.amt - self.started_at;
 
         self.writer.write_pod(&types::DataDescriptor64 {
@@ -460,6 +471,7 @@ impl<W: Write> RawFileStreamer<'_, W> {
                 typ: FileType::File,
                 modified_at: self.modified_at,
             },
+            comment,
             true,
             self.local_header_offset,
         )?;
