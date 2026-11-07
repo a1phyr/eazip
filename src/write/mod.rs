@@ -24,6 +24,9 @@ pub struct FileOptions {
     /// Default value is `Timestamp::UNIX_EPOCH`, which means that this field is
     /// ignored.
     pub modified_at: Timestamp,
+    /// Unix mode for the entry. The value is masked with `0o7777`, so only the
+    /// first 12 bits are used.
+    pub unix_mode: u32,
 }
 
 /// Wraps a writer to create a ZIP archive.
@@ -119,6 +122,7 @@ impl<W: io::Write> ArchiveWriter<W> {
                 crc32,
                 typ: crate::FileType::File,
                 modified_at: options.modified_at,
+                unix_mode: options.unix_mode,
             },
             "",
         )?;
@@ -161,6 +165,7 @@ impl<W: io::Write> ArchiveWriter<W> {
                 crc32: 0,
                 typ: crate::FileType::Directory,
                 modified_at: Timestamp::UNIX_EPOCH,
+                unix_mode: 0o644,
             },
             "",
         )
@@ -183,6 +188,7 @@ impl<W: io::Write> ArchiveWriter<W> {
                 crc32: crc32fast::hash(target.as_bytes()),
                 typ: crate::FileType::Symlink,
                 modified_at: Timestamp::UNIX_EPOCH,
+                unix_mode: 0o777,
             },
             "",
         )

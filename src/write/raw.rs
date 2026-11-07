@@ -98,6 +98,7 @@ pub struct Metadata {
     pub crc32: u32,
     pub typ: FileType,
     pub modified_at: Timestamp,
+    pub unix_mode: u32,
 }
 
 #[derive(Debug, Default)]
@@ -231,6 +232,7 @@ impl RawArchiveWriter {
                 crc32: 0,
                 typ: FileType::File,
                 modified_at: options.modified_at,
+                unix_mode: 0,
             },
             true,
         )?;
@@ -243,6 +245,7 @@ impl RawArchiveWriter {
             local_header_offset,
             compression_method: options.compression_method,
             modified_at: options.modified_at,
+            unix_mode: options.unix_mode,
 
             raw: self,
         })
@@ -334,8 +337,9 @@ impl RawArchiveWriter {
         let attributes = match meta.typ {
             FileType::File => (1 << 5) | (8 << 28),
             FileType::Directory => (1 << 4) | (4 << 28),
-            FileType::Symlink => (0o777 << 16) | (10 << 28),
+            FileType::Symlink => 10 << 28,
         };
+        let attributes = attributes | (meta.unix_mode & 0o7777) << 16;
 
         self.central_headers.extend_from_slice(
             types::CentralFileHeader {
@@ -431,6 +435,7 @@ pub struct RawFileStreamer<'a, W: Write> {
     local_header_offset: u64,
     compression_method: CompressionMethod,
     modified_at: Timestamp,
+    unix_mode: u32,
 
     raw: &'a mut RawArchiveWriter,
 }
@@ -470,6 +475,7 @@ impl<W: Write> RawFileStreamer<'_, W> {
                 crc32,
                 typ: FileType::File,
                 modified_at: self.modified_at,
+                unix_mode: self.unix_mode,
             },
             comment,
             true,
