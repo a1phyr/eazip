@@ -223,6 +223,12 @@ pub struct Metadata {
     pub crc32: u32,
     pub file_type: FileType,
 
+    /// Unix permissions for this file. Only the first 12 bits is exposed, which
+    /// matches the `0o7777` mask. May be `0` if unspecified.
+    ///
+    /// **Warning**: When using this value on a real filesystem, make sure that
+    /// the sticky bit and the set-user-ID bit match what you expect.
+    pub unix_mode: u32,
     pub modification_time: Option<Timestamp>,
     pub access_time: Option<Timestamp>,
     pub creation_time: Option<Timestamp>,
@@ -274,6 +280,7 @@ impl Metadata {
             compression_method: CompressionMethod(header.compression_method.get()),
             file_type: FileType::File,
 
+            unix_mode: 0,
             modification_time: None,
             access_time: None,
             creation_time: None,
@@ -333,6 +340,7 @@ impl Metadata {
             compression_method: CompressionMethod(header.compression_method.get()),
             file_type,
 
+            unix_mode: header.external_attributes.get() >> 16 & 0o777,
             modification_time: None,
             access_time: None,
             creation_time: None,
