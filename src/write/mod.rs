@@ -29,6 +29,27 @@ pub struct FileOptions {
     pub unix_mode: u32,
 }
 
+impl FileOptions {
+    /// Sets the compression method and level of the options.
+    pub fn compression(mut self, method: CompressionMethod, level: Option<i32>) -> Self {
+        self.compression_method = method;
+        self.level = level;
+        self
+    }
+
+    /// Sets the modification time of the entry.
+    pub fn modified_at(mut self, modified_at: Timestamp) -> Self {
+        self.modified_at = modified_at;
+        self
+    }
+
+    /// Sets the Unix mode of the entry.
+    pub fn unix_mode(mut self, unix_mode: u32) -> Self {
+        self.unix_mode = unix_mode;
+        self
+    }
+}
+
 /// Wraps a writer to create a ZIP archive.
 ///
 /// You need to call `self.finish()` when done.
