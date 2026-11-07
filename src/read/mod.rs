@@ -628,6 +628,15 @@ impl<R: Read + Seek> ArchiveReader<R> {
         Ok(Self { inner, reader })
     }
 
+    /// Gets the number of entries in the archive.
+    ///
+    /// This is a shorthand for `self.entries().len()`.
+    #[inline]
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
+        self.inner.entries.len()
+    }
+
     /// Gets the list of entries in the archive.
     #[inline]
     pub fn entries(&self) -> &[Metadata] {
