@@ -40,7 +40,7 @@ pub(crate) fn validate_name(name: &str) -> Option<Box<str>> {
 
 pub(crate) fn validate_symlink(name: &str, target: &str) -> bool {
     if target.starts_with('/')
-        || memchr::memchr2(b'\\', b'\0', name.as_bytes()).is_some()
+        || memchr::memchr2(b'\\', b'\0', target.as_bytes()).is_some()
         || (cfg!(windows) && target.contains(':'))
     {
         return false;
@@ -347,6 +347,7 @@ fn symlink_validation() {
     assert!(!validate_symlink("a/b", "/c"));
     assert!(!validate_symlink("a/b", ".//////../../c"));
     assert!(!validate_symlink("a/b", "a/../c"));
+    assert!(!validate_symlink("a/b", "a\\b"));
     #[cfg(windows)]
     assert!(!validate_symlink("a/b", "C:/e"));
 }
