@@ -228,6 +228,7 @@ pub struct Metadata {
     ///
     /// **Warning**: When using this value on a real filesystem, make sure that
     /// the sticky bit and the set-user-ID bit match what you expect.
+    /// These special bits are ignored by the `extract` method family.
     pub unix_mode: u32,
     pub modification_time: Option<Timestamp>,
     pub access_time: Option<Timestamp>,
@@ -529,6 +530,9 @@ impl Metadata {
         let path = at.join(&*self.name);
         std::fs::create_dir_all(path.parent().unwrap())?;
 
+        #[cfg(unix)]
+        let perms = std::os::unix::fs::PermissionsExt::from_mode(self.unix_mode & 0o777);
+
         match self.file_type {
             FileType::File => {
                 let mut f = std::fs::File::create_new(&path)?;
@@ -537,9 +541,18 @@ impl Metadata {
                 if let Some(mod_time) = self.modification_time {
                     f.set_times(std::fs::FileTimes::new().set_modified(mod_time.to_std()))?;
                 }
+                #[cfg(unix)]
+                if self.unix_mode != 0 {
+                    f.set_permissions(perms)?;
+                }
             }
             FileType::Directory => {
-                std::fs::create_dir(path)?;
+                std::fs::create_dir(&path)?;
+
+                #[cfg(unix)]
+                if self.unix_mode != 0 {
+                    std::fs::set_permissions(&path, perms)?;
+                }
             }
             FileType::Symlink => {
                 let target = io::read_to_string(self.read(reader)?)?;
