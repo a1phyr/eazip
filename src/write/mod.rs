@@ -165,7 +165,7 @@ impl<W: io::Write> ArchiveWriter<W> {
                 crc32: 0,
                 typ: crate::FileType::Directory,
                 modified_at: Timestamp::UNIX_EPOCH,
-                unix_mode: 0o644,
+                unix_mode: 0,
             },
             "",
         )
