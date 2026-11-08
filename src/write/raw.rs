@@ -167,6 +167,9 @@ impl RawArchiveWriter {
         if u16::try_from(name.len()).is_err() {
             return Err(invalid_name("file name too long"));
         }
+        if name.is_empty() {
+            return Err(invalid_name("file name cannot be empty"));
+        }
         match (name.ends_with('/'), typ.is_directory()) {
             (false, true) => return Err(invalid_name("directory name must end with '/'")),
             (true, false) => return Err(invalid_name("file name must not end with '/'")),
