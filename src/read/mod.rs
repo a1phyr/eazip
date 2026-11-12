@@ -12,6 +12,8 @@ mod raw;
 
 use extra_field::{ExtraField, ExtraFields};
 
+pub use utils::validate_symlink;
+
 #[cold]
 fn invalid(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, msg)
@@ -556,7 +558,7 @@ impl Metadata {
             }
             FileType::Symlink => {
                 let target = io::read_to_string(self.read(reader)?)?;
-                if !utils::validate_symlink(&self.name, &target) {
+                if !validate_symlink(&self.name, &target) {
                     return Err(invalid("invalid symlink target"));
                 }
 

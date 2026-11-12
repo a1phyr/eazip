@@ -38,7 +38,28 @@ pub(crate) fn validate_name(name: &str) -> Option<Box<str>> {
     Some(dst.into_boxed_str())
 }
 
-pub(crate) fn validate_symlink(name: &str, target: &str) -> bool {
+/// Checks whether a symlink is safe to use.
+///
+/// A symlink contained in an untrusted zip file may point to an absolute path,
+/// to a parent path (eg `../../etc/passwd`), or even use another symlink to
+/// point outside the extraction directory. This function tests against such
+/// malicious links.
+///
+/// This function is public because `eazip` doesn't validate symlinks when an
+/// archive is read, because they could be compressed with an algorithm unknown
+/// to `eazip`. This enables users of this crate to be safe even in such
+/// circumstance.
+///
+/// # Example
+///
+/// ```
+/// use eazip::read::validate_symlink;
+///
+/// assert!(validate_symlink("a", "b/c"));
+/// assert!(!validate_symlink("a", "/b/c"));
+/// assert!(!validate_symlink("a", "../b/c"));
+/// ```
+pub fn validate_symlink(name: &str, target: &str) -> bool {
     if target.starts_with('/')
         || memchr::memchr2(b'\\', b'\0', target.as_bytes()).is_some()
         || (cfg!(windows) && target.contains(':'))
