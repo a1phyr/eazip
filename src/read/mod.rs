@@ -1,9 +1,7 @@
 //! Utilities to read an archive.
 
-use std::{
-    borrow::Cow,
-    io::{self, BufRead, Read, Seek},
-};
+use crate::io::{self, BufRead, Read, Seek};
+use alloc::{borrow::Cow, boxed::Box, fmt, string::String, vec::Vec};
 
 use crate::{CompressionMethod, Decompressor, FileType, Timestamp, types, utils};
 
@@ -32,7 +30,9 @@ fn compressed() -> io::Error {
 trait ReadSeek: Read + Seek {}
 impl<R: Read + Seek> ReadSeek for R {}
 
+#[cfg(feature = "std")]
 trait BufReadSeek: BufRead + Seek {}
+#[cfg(feature = "std")]
 impl<R: BufRead + Seek> BufReadSeek for R {}
 
 /// The method used to encrypt a file.
@@ -70,8 +70,8 @@ pub struct RawArchive {
     comment: Box<[u8]>,
 }
 
-impl std::fmt::Debug for RawArchive {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for RawArchive {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RawArchive")
             .field("entries", &self.entries)
             .field("comment", &String::from_utf8_lossy(&self.comment))
@@ -129,6 +129,7 @@ impl RawArchive {
     /// Extracts the archive to the given directory.
     ///
     /// The directory will be created if needed, but *not* its parent.
+    #[cfg(feature = "std")]
     pub fn extract<R: BufRead + Seek>(
         &self,
         reader: &mut R,
@@ -490,7 +491,7 @@ impl Metadata {
 
         // Check CRC beforehand. Length has already been checked.
         let mut checker = utils::Crc32Checker::new(self.read_raw(&mut reader)?, self.crc32);
-        std::io::copy(&mut checker, &mut io::sink())?;
+        io::copy(&mut checker, &mut io::sink())?;
 
         self.read_raw(reader)
     }
@@ -515,6 +516,7 @@ impl Metadata {
     }
 
     /// Extracts this entry as if the root of the archive was at `root`.
+    #[cfg(feature = "std")]
     #[inline]
     pub fn extract<R: BufRead + Seek>(
         &self,
@@ -524,6 +526,7 @@ impl Metadata {
         self._extract(reader, root.as_ref())
     }
 
+    #[cfg(feature = "std")]
     fn _extract(&self, reader: &mut dyn BufReadSeek, at: &std::path::Path) -> io::Result<()> {
         if !std::fs::metadata(at)?.is_dir() {
             return Err(io::Error::from(io::ErrorKind::NotFound));
@@ -609,6 +612,7 @@ pub struct ArchiveReader<R> {
     reader: R,
 }
 
+#[cfg(feature = "std")]
 impl ArchiveReader<io::BufReader<std::fs::File>> {
     /// Opens the given file as a ZIP archive.
     #[inline]
@@ -696,6 +700,7 @@ impl<R: Read + Seek> ArchiveReader<R> {
     /// Extracts the archive to the given directory.
     ///
     /// The directory will be created if needed, but *not* its parent.
+    #[cfg(feature = "std")]
     #[inline]
     pub fn extract(&mut self, at: impl AsRef<std::path::Path>) -> io::Result<()>
     where

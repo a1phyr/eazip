@@ -1,4 +1,4 @@
-pub fn convert(data: &[u8]) -> String {
+pub fn convert(data: &[u8]) -> alloc::string::String {
     data.iter().map(|&b| byte_to_char(b)).collect()
 }
 

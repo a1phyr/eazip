@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::fmt;
+use core::fmt;
 
 /// # Safety
 ///
@@ -10,17 +10,17 @@ pub(crate) unsafe trait Pod: 'static {
     where
         Self: Sized,
     {
-        unsafe { std::mem::zeroed() }
+        unsafe { core::mem::zeroed() }
     }
 
     fn as_bytes(&self) -> &[u8] {
         let size = size_of_val(self);
-        unsafe { std::slice::from_raw_parts(self as *const _ as *const u8, size) }
+        unsafe { core::slice::from_raw_parts(self as *const _ as *const u8, size) }
     }
 
     fn as_bytes_mut(&mut self) -> &mut [u8] {
         let size = size_of_val(self);
-        unsafe { std::slice::from_raw_parts_mut(self as *mut _ as *mut u8, size) }
+        unsafe { core::slice::from_raw_parts_mut(self as *mut _ as *mut u8, size) }
     }
 }
 

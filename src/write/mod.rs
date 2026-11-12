@@ -3,9 +3,10 @@
 use crate::{
     CompressionMethod, Timestamp,
     compression::Compressor,
+    io,
     utils::{Counter, Crc32Writer},
 };
-use std::{fmt, io};
+use alloc::{fmt, vec::Vec};
 
 mod raw;
 
@@ -88,6 +89,7 @@ pub struct ArchiveWriter<W: io::Write> {
     raw: raw::RawArchiveWriter,
 }
 
+#[cfg(feature = "std")]
 impl ArchiveWriter<std::fs::File> {
     /// Creates a new `ArchiveWriter` that writes to the given file.
     ///

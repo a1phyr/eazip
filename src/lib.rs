@@ -42,9 +42,17 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_debug_implementations)]
+#![no_std]
+#![cfg_attr(not(feature = "std"), feature(alloc_io))]
+
+extern crate alloc;
+#[cfg(feature = "std")]
+extern crate std;
 
 #[cfg(not(feature = "std"))]
-compile_error!("`no_std` is not supported yet");
+use alloc::io;
+#[cfg(feature = "std")]
+use std::io;
 
 mod compression;
 pub mod read;

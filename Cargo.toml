@@ -16,7 +16,11 @@ keywords = ["zip", "archive"]
 [features]
 default = ["deflate", "zstd", "std"]
 
-# Mandatory feature for forward-compatibility.
+# Enables `std` support.
+#
+# Not enabling this feature is experimental: it requires a nightly toolchain
+# and may break at any moment. If you use this feature, you should pin both
+# your toolchain and `eazip` version.
 std = []
 # Enable deflate compression and decompression.
 deflate = ["dep:flate2"]
@@ -24,7 +28,7 @@ deflate = ["dep:flate2"]
 zstd = ["dep:zstd"]
 
 # Enable parallel ZIP file extraction.
-parallel = ["dep:rayon", "dep:sync_file"]
+parallel = ["std", "dep:rayon", "dep:sync_file"]
 
 
 [dependencies]

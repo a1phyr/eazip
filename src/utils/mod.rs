@@ -5,12 +5,11 @@ pub use crc32::{Crc32Checker, Crc32Writer};
 
 use hashbrown::HashTable;
 
-use std::{
-    fmt,
-    hash::{BuildHasher, Hash, RandomState},
-    io,
-    time::SystemTime,
-};
+use crate::io;
+use alloc::{boxed::Box, fmt, string::String, vec::Vec};
+use core::hash::{BuildHasher, Hash};
+#[cfg(feature = "std")]
+use std::{hash::RandomState, time::SystemTime};
 
 #[must_use]
 pub(crate) fn validate_name(name: &str) -> Option<Box<str>> {
@@ -126,6 +125,7 @@ impl Timestamp {
     pub const UNIX_EPOCH: Self = Self(0);
 
     /// Returns the timestamp corresponding to "now".
+    #[cfg(feature = "std")]
     #[inline]
     pub fn now() -> Self {
         Self::from_std(SystemTime::now())
@@ -152,6 +152,7 @@ impl Timestamp {
     /// Returns a `Timestamp` from a [`SystemTime`].
     ///
     /// Sub-second precision is lost in the process.
+    #[cfg(feature = "std")]
     #[inline]
     pub fn from_std(t: SystemTime) -> Self {
         Self(t.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs())
@@ -164,6 +165,7 @@ impl Timestamp {
     }
 
     /// Converts this timestamp to a [`SystemTime`].
+    #[cfg(feature = "std")]
     #[inline]
     pub fn to_std(self) -> SystemTime {
         SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(self.0)
@@ -310,6 +312,36 @@ impl<R: io::Read> io::Read for LengthChecker<R> {
     }
 }
 
+#[cfg(not(feature = "std"))]
+struct RandomState(u64, u64);
+
+#[cfg(not(feature = "std"))]
+impl Default for RandomState {
+    fn default() -> Self {
+        use core::sync::atomic;
+
+        static NEXT_KEY: atomic::AtomicUsize = atomic::AtomicUsize::new(0x8742e7ce);
+        let x = ();
+
+        // Unfortunately a proper random seed isn't available here, so we do our
+        // best to use different seeds each time, even with very low entropy.
+        Self(
+            &raw const x as u64,
+            NEXT_KEY.fetch_add(9, atomic::Ordering::Relaxed) as _,
+        )
+    }
+}
+
+#[cfg(not(feature = "std"))]
+#[expect(deprecated)]
+impl BuildHasher for RandomState {
+    type Hasher = core::hash::SipHasher;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        core::hash::SipHasher::new_with_keys(self.0, self.1)
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct NameTable<T> {
     table: HashTable<T>,
@@ -320,7 +352,7 @@ impl<T> NameTable<T> {
     pub fn with_capacity(cap: usize) -> Self {
         Self {
             table: HashTable::with_capacity(cap),
-            hasher: RandomState::new(),
+            hasher: RandomState::default(),
         }
     }
 

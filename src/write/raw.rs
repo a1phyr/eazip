@@ -1,12 +1,10 @@
 use crate::{
     CompressionMethod, FileType, Timestamp,
+    io::{self, Write},
     types::{self, Pod},
     utils,
 };
-use std::{
-    fmt,
-    io::{self, Write},
-};
+use alloc::{boxed::Box, fmt, vec::Vec};
 
 trait WriteExt: Write {
     fn write_pod<T: Pod>(&mut self, data: &T) -> io::Result<()> {

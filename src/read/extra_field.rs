@@ -4,7 +4,7 @@
 
 #![allow(unused)]
 
-use std::fmt;
+use core::fmt;
 
 use crate::utils::Timestamp;
 
@@ -265,7 +265,7 @@ impl<'a> UnicodeComment<'a> {
 
         let header_comment_crc32 = data.read_u32()?;
 
-        let comment = std::str::from_utf8(data.0).ok()?;
+        let comment = core::str::from_utf8(data.0).ok()?;
 
         Some(UnicodeComment {
             version,
@@ -291,7 +291,7 @@ impl<'a> UnicodeName<'a> {
 
         let header_name_crc32 = data.read_u32()?;
 
-        let name = std::str::from_utf8(data.0).ok()?;
+        let name = core::str::from_utf8(data.0).ok()?;
 
         Some(UnicodeName {
             version,

@@ -1,4 +1,5 @@
-use std::io::{self, Read, Write};
+use crate::io::{self, Read, Write};
+use alloc::{string::String, vec::Vec};
 
 pub struct Crc32Checker<R> {
     hasher: crc32fast::Hasher,
@@ -105,7 +106,7 @@ impl<W: Write> Write for Crc32Writer<W> {
             if left == 0 {
                 break;
             }
-            let size = std::cmp::min(left, buf.len());
+            let size = core::cmp::min(left, buf.len());
             self.hasher.update(&buf[..size]);
             left -= size;
         }

@@ -1,9 +1,10 @@
 use super::{Metadata, ReadSeek};
 use crate::{
+    io,
     types::{self, Pod},
     utils::Counter,
 };
-use std::io;
+use alloc::{boxed::Box, vec::Vec};
 
 #[inline]
 fn not_a_zip() -> io::Error {
@@ -117,10 +118,10 @@ fn find_eocd(reader: &mut dyn ReadSeek) -> io::Result<EocdData> {
     }
 
     // This one does
-    let read_size = std::cmp::min(size, 22 + u16::MAX as u64);
+    let read_size = core::cmp::min(size, 22 + u16::MAX as u64);
     let pos = reader.seek(io::SeekFrom::Start(size - read_size))?;
 
-    let mut buffer = vec![0; read_size as usize];
+    let mut buffer = alloc::vec![0; read_size as usize];
     reader.read_exact(&mut buffer)?;
 
     if let Some(eocd) = find_eocd_in_buffer(pos, &buffer)? {

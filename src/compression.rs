@@ -1,4 +1,5 @@
-use std::{fmt, io};
+use crate::io;
+use alloc::{fmt, string::String, vec::Vec};
 
 /// A compression method used in an archive.
 ///
@@ -67,7 +68,7 @@ impl CompressionMethod {
 fn unsupported_method(method: CompressionMethod) -> io::Error {
     io::Error::new(
         io::ErrorKind::Unsupported,
-        format!("Unsupported compression method: {method:?}"),
+        alloc::format!("Unsupported compression method: {method:?}"),
     )
 }
 
