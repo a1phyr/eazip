@@ -344,7 +344,7 @@ impl Metadata {
             compression_method: CompressionMethod(header.compression_method.get()),
             file_type,
 
-            unix_mode: header.external_attributes.get() >> 16 & 0o777,
+            unix_mode: header.external_attributes.get() >> 16 & 0o7777,
             modification_time: None,
             access_time: None,
             creation_time: None,
