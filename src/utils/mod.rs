@@ -7,7 +7,7 @@ use hashbrown::HashTable;
 
 use crate::io;
 use alloc::{boxed::Box, fmt, string::String, vec::Vec};
-use core::hash::{BuildHasher, Hash};
+use core::hash::{BuildHasher, Hash, Hasher};
 #[cfg(feature = "std")]
 use std::{hash::RandomState, time::SystemTime};
 
@@ -348,6 +348,13 @@ pub(crate) struct NameTable<T> {
     hasher: RandomState,
 }
 
+// We only ever hash a single byte slice, so we can skip the length part
+fn hash_bytes(hasher: &RandomState, bytes: &[u8]) -> u64 {
+    let mut hasher = hasher.build_hasher();
+    hasher.write(bytes);
+    hasher.finish()
+}
+
 impl<T> NameTable<T> {
     pub fn with_capacity(cap: usize) -> Self {
         Self {
@@ -363,7 +370,7 @@ impl<T> NameTable<T> {
         f: impl Fn(&T) -> &'a [u8],
     ) -> Result<(), io::ErrorKind> {
         self.table
-            .try_reserve(cap, |x| self.hasher.hash_one(f(x)))
+            .try_reserve(cap, |x| hash_bytes(&self.hasher, f(x)))
             .map_err(|_| io::ErrorKind::OutOfMemory)
     }
 
@@ -373,16 +380,16 @@ impl<T> NameTable<T> {
     }
 
     pub fn get<'a>(&self, name: &[u8], f: impl Fn(&T) -> &'a [u8]) -> Option<&T> {
-        let hash = self.hasher.hash_one(name);
+        let hash = hash_bytes(&self.hasher, name);
         self.table.find(hash, |x| f(x) == name)
     }
 
     pub fn insert<'a>(&mut self, value: T, f: impl Fn(&T) -> &'a [u8]) -> bool {
         let name = f(&value);
-        let hash = self.hasher.hash_one(name);
+        let hash = hash_bytes(&self.hasher, name);
         let entry = self
             .table
-            .entry(hash, |x| f(x) == name, |x| self.hasher.hash_one(f(x)));
+            .entry(hash, |x| f(x) == name, |x| hash_bytes(&self.hasher, f(x)));
         match entry {
             hashbrown::hash_table::Entry::Occupied(_) => false,
             hashbrown::hash_table::Entry::Vacant(entry) => {
