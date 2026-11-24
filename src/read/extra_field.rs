@@ -341,7 +341,7 @@ impl Aes {
         };
 
         let vendor_id = data.read_u16()?;
-        if vendor_id != u16::from_ne_bytes(*b"AE") {
+        if vendor_id != u16::from_le_bytes(*b"AE") {
             return None;
         }
 
