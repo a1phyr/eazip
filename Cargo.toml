@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.87"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-description = "An simple yet flexible zip library"
+description = "A simple yet flexible zip library"
 
 repository = "https://github.com/a1phyr/eazip"
 documentation = "https://docs.rs/eazip"

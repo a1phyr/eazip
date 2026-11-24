@@ -72,7 +72,7 @@ pub struct CentralDirectory {
 }
 
 impl CentralDirectory {
-    /// Validates that that the central directory has a decent size
+    /// Validates that the central directory has a decent size
     fn validate_size(&self) -> Option<()> {
         let min_size =
             (size_of::<types::CentralFileHeader>() as u64 + 1).checked_mul(self.entries)?;
@@ -279,7 +279,7 @@ fn check_local_entry(
     // Read the data descriptor if needed
     read_data_descriptor(reader, &mut local_entry)?;
 
-    // Now we can check that both header are consistent
+    // Now we can check that both headers are consistent
     if entry.compression_method != local_entry.compression_method
         || entry.name != local_entry.name
         || entry.compressed_size != local_entry.compressed_size
@@ -301,7 +301,7 @@ fn check_local_entry(
         return Err(invalid_entry());
     }
 
-    // Extended timestamp entries usually stores creation and access timestamps
+    // Extended timestamp entries usually store creation and access timestamps
     // in local headers only
     if entry.creation_time.is_none() {
         entry.creation_time = local_entry.creation_time;
@@ -322,7 +322,7 @@ fn read_central_directory(
         return Ok(Vec::new());
     }
 
-    // We can't support zip archives with more than ~2 billions entries on 32 bits
+    // We can't support zip archives with more than ~2 billion entries on 32-bit
     // platforms, but these archives are probably broken anyway.
     let len = len.try_into().map_err(|_| invalid_zip())?;
 

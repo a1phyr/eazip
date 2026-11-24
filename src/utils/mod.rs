@@ -117,7 +117,7 @@ impl FileType {
 
 /// A timestamp for an entry in an archive.
 ///
-/// It is stored as a 64-bits UNIX timestamp, and therefore has second precision.
+/// It is stored as a 64-bit UNIX timestamp, and therefore has second precision.
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Timestamp(u64);
 
@@ -131,7 +131,7 @@ impl Timestamp {
         Self::from_std(SystemTime::now())
     }
 
-    /// Returns a `Timestamp` from a NTFS timestamp.
+    /// Returns a `Timestamp` from an NTFS timestamp.
     ///
     /// Sub-second precision is lost in the process.
     pub fn from_ntfs(time: u64) -> Self {
@@ -143,7 +143,7 @@ impl Timestamp {
         Self(time / 10_000_000)
     }
 
-    /// Returns a `Timestamp` from an UNIX timestamp.
+    /// Returns a `Timestamp` from a UNIX timestamp.
     #[inline]
     pub fn from_unix(time: u64) -> Self {
         Self(time)
@@ -158,7 +158,7 @@ impl Timestamp {
         Self(t.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs())
     }
 
-    /// Converts this timestamp to an UNIX timestamp.
+    /// Converts this timestamp to a UNIX timestamp.
     #[inline]
     pub fn to_unix(self) -> u64 {
         self.0

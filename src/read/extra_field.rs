@@ -210,7 +210,7 @@ impl ExtendedTimestamp {
     fn parse(mut data: DataParser<'_>) -> Option<Self> {
         let flags = data.read_u8()?;
 
-        // There are ZIP out there that don't respect the spec.
+        // There are ZIP files out there that don't respect the spec.
         // If there is only one time, and this doesn't match `flags`,
         // assume that this is modification time
         if data.0.len() == 4 && flags.count_ones() != 1 {

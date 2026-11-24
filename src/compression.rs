@@ -39,9 +39,9 @@ impl Default for CompressionMethod {
 }
 
 impl CompressionMethod {
-    /// The compressions methods natively supported by this crate.
+    /// The compression methods natively supported by this crate.
     ///
-    /// Exact value varies depending the enabled features.
+    /// Exact value varies depending on the enabled features.
     pub const SUPPORTED: &[CompressionMethod] = &[
         Self::STORE,
         #[cfg(feature = "deflate")]
@@ -202,7 +202,7 @@ enum CompressorImpl<W: io::Write> {
 impl<W: io::Write> Compressor<W> {
     /// Creates a new `Compressor`.
     ///
-    /// The `level` parameter signification depends on the method used. `None`
+    /// The `level` parameter meaning depends on the method used. `None`
     /// always means "default level" and is always supported.
     ///
     /// Compression methods unsupported by this crate will cause an error.
@@ -280,7 +280,7 @@ impl<W: io::Write> Compressor<W> {
         }
     }
 
-    /// Finishes the stream and get the writer back.
+    /// Finishes the stream and gets the writer back.
     ///
     /// You must finish the stream when you're done writing.
     pub fn finish(self) -> io::Result<W> {

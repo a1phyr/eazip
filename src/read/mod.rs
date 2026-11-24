@@ -54,9 +54,9 @@ pub enum EncryptionMethod {
     /// See [the specification](https://www.winzip.com/en/support/aes-encryption/#file-format1)
     /// for the format of the encrypted files.
     Aes {
-        /// The size of the AES key. This may be 128, 192 or 256 bytes.
+        /// The size of the AES key. This may be 128, 192 or 256 bits.
         key_size: u16,
-        /// Whether to check the CRC32 of the decypted content.
+        /// Whether to check the CRC32 of the decrypted content.
         ///
         /// If `true`, this will lead to data leak.
         check_crc32: bool,
@@ -198,7 +198,7 @@ impl FileType {
 }
 
 fn convert_string(raw: &[u8], force_unicode: bool) -> Option<(Cow<'_, str>, Option<u32>)> {
-    // MacOS stores the file name as UTF8, but does not use the unicode flag,
+    // macOS stores the file name as UTF8, but does not use the Unicode flag,
     // and everyone seems fine with that, so if we meet UTF8 we'll just pretend
     // that everything is fine.
     if let Ok(name) = str::from_utf8(raw) {
@@ -226,7 +226,7 @@ pub struct Metadata {
     pub crc32: u32,
     pub file_type: FileType,
 
-    /// Unix permissions for this file. Only the first 12 bits is exposed, which
+    /// Unix permissions for this file. Only the first 12 bits are exposed, which
     /// matches the `0o7777` mask. May be `0` if unspecified.
     ///
     /// **Warning**: When using this value on a real filesystem, make sure that
@@ -476,7 +476,7 @@ impl Metadata {
 
     /// Returns a reader with the content of the file.
     ///
-    /// Errors if the file is compressed, encrypted or corrupted. Is is not
+    /// Errors if the file is compressed, encrypted or corrupted. It is not
     /// necessary to use `Metadata::content_checker` on the result.
     ///
     /// It is useful if you know that the file is stored as-is and you want to
@@ -496,7 +496,7 @@ impl Metadata {
         self.read_raw(reader)
     }
 
-    /// Returns a reader with the raw, uncompressed, content of the file.
+    /// Returns a reader with the raw, compressed content of the file.
     ///
     /// The uncompressed content should be checked with `content_checker`.
     pub fn read_raw<R: Read + Seek>(&self, mut reader: R) -> io::Result<io::Take<R>> {
@@ -506,7 +506,7 @@ impl Metadata {
 
     /// Wraps a reader to check that its content matches this metadata.
     ///
-    /// It is particularly  useful in combinaison of `read_raw`.
+    /// It is particularly useful in combination with `read_raw`.
     #[inline]
     pub fn content_checker<R: Read>(&self, reader: R) -> impl Read + use<R> {
         utils::Crc32Checker::new(
@@ -641,15 +641,15 @@ impl ArchiveReader<io::BufReader<sync_file::SyncFile>> {
 impl<R: Read + Seek> ArchiveReader<R> {
     /// Opens a ZIP archive from a reader.
     ///
-    /// This also perform many validation checks on the archive to make sure
-    /// that is it well-formed and does not have dangerous or duplicated paths.
+    /// This also performs many validation checks on the archive to make sure
+    /// that it is well-formed and does not have dangerous or duplicated paths.
     /// The validity of file contents is checked lazily when reading them.
     ///
-    /// The exact rules around validation are not part of semver guaranties and
+    /// The exact rules around validation are not part of semver guarantees and
     /// may change at every release.
     ///
     /// **The targets of symlinks are not checked yet here**, though they are
-    /// through `extract` and `extract_parallel`.
+    /// through `extract` and `parallel_extract`.
     pub fn new(mut reader: R) -> io::Result<Self> {
         let inner = RawArchive::new(&mut reader)?;
         Ok(Self { inner, reader })
@@ -770,7 +770,7 @@ impl<'a, R: Read + Seek> File<'a, R> {
 
     /// Returns a reader with the content of the file.
     ///
-    /// Errors if the file is compressed, encrypted or corrupted. Is is not
+    /// Errors if the file is compressed, encrypted or corrupted. It is not
     /// necessary to use `Metadata::content_checker` on the result.
     ///
     /// It is useful if you know that the file is stored as-is and you want to
@@ -779,7 +779,7 @@ impl<'a, R: Read + Seek> File<'a, R> {
         self.metadata.read_stored(self.reader)
     }
 
-    /// Returns a reader with the raw, compressed, content of the file.
+    /// Returns a reader with the raw, compressed content of the file.
     ///
     /// The uncompressed content should be checked with [`Metadata::content_checker`].
     #[inline]

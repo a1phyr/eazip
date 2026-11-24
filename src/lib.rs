@@ -1,12 +1,12 @@
-//! An simple yet flexible zip library.
+//! A simple yet flexible zip library.
 //!
 //! This crate provides tools to read and write ZIP archives. It aims at being
-//! nice to use for developpers, which includes a good and flexible API,
+//! nice to use for developers, which includes a good and flexible API,
 //! readable source code and clean maintenance.
 //!
 //! Given how loose the ZIP spec is about what is a valid ZIP file and the
 //! history of security issues around them, this crate also aims at being robust
-//! and secure against malicious input. It might therefore may reject some
+//! and secure against malicious input. It may therefore reject some
 //! "technically valid" ZIP files. If your ZIP file does not validate but you
 //! think it should, feel free to file an issue.
 //!

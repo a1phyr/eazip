@@ -11,8 +11,6 @@ use alloc::{fmt, vec::Vec};
 mod raw;
 
 /// The options used when adding a file to an archive.
-///
-/// Setting the timestamp is not implemented yet.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 pub struct FileOptions {
@@ -252,7 +250,7 @@ impl<W: io::Write> ArchiveWriter<W> {
         self.writer.flush()
     }
 
-    /// Finishes writing the archive and get the writer back.
+    /// Finishes writing the archive and gets the writer back.
     ///
     /// It is necessary to call this method or the resulting archive will not
     /// be readable.

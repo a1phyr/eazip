@@ -3,11 +3,11 @@
 [![Crates.io](https://img.shields.io/crates/v/eazip.svg)](https://crates.io/crates/eazip)
 [![Docs.rs](https://docs.rs/eazip/badge.svg)](https://docs.rs/eazip/)
 
-An simple yet flexible zip library.
+A simple yet flexible zip library.
 
-This crate provides tools to read and write ZIP archives. It aims at being nice to use for developpers, which includes a good and flexible API, readable source code and clean maintenance.
+This crate provides tools to read and write ZIP archives. It aims at being nice to use for developers, which includes a good and flexible API, readable source code and clean maintenance.
 
-Given how loose the ZIP spec is about what is a valid ZIP file and the history of security issues around them, this crate also aims at being robust and secure against malicious input. It might therefore may reject some "technically valid" ZIP files. If your ZIP file does not validate but you think it should, feel free to file an issue.
+Given how loose the ZIP spec is about what is a valid ZIP file and the history of security issues around them, this crate also aims at being robust and secure against malicious input. It may therefore reject some "technically valid" ZIP files. If your ZIP file does not validate but you think it should, feel free to file an issue.
 
 ## Examples
 
@@ -57,10 +57,10 @@ archive.finish()?;
 
 ## Goals
 
-- Protect against malicious archives and zip confusion attack.
+- Protect against malicious archives and zip confusion attacks.
 - Don't panic under any input.
 - Have readable code and a simple API.
-- Well-tested against common ZIP files tools.
+- Well-tested against common ZIP tools.
 - Be performant.
 
 ## Non-goals
