@@ -264,6 +264,9 @@ impl<R> LengthChecker<R> {
 
 impl<R: io::Read> io::Read for LengthChecker<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
         let n = self.reader.read(buf)?;
         if n == 0 && self.expected != 0 {
             return Err(bad_length());

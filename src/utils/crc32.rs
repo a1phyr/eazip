@@ -20,6 +20,10 @@ impl<R> Crc32Checker<R> {
 
 impl<R: Read> Read for Crc32Checker<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
         let n = self.reader.read(buf)?;
 
         if n == 0 && self.hasher.clone().finalize() != self.expected {
