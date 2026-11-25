@@ -152,15 +152,16 @@ fn read_eocd64(reader: &mut dyn ReadSeek, offset: u64) -> io::Result<CentralDire
     reader.seek(io::SeekFrom::Start(eocd_offset))?;
     let end_dir: types::EndOfCentralDirectory64 = reader.read_pod()?;
 
+    if { end_dir.signature } != types::EndOfCentralDirectory64::SIGNATURE
+        || { end_dir.total_entries } != { end_dir.entries_on_this_disk }
+        || (eocd_offset + 12).checked_add(end_dir.record_size.get()) != Some(locator_offset)
+    {
+        return Err(invalid_zip());
+    }
+
     // Yes, this is the third time that we do that stupid check
     if end_dir.disk_with_central_directory.get() != 0 || end_dir.disk_number.get() != 0 {
         return Err(multi_disk());
-    }
-
-    if { end_dir.total_entries } != { end_dir.entries_on_this_disk }
-        || eocd_offset.checked_add(end_dir.record_size.get() + 12) != Some(locator_offset)
-    {
-        return Err(invalid_zip());
     }
 
     Ok(CentralDirectory {
