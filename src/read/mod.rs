@@ -693,6 +693,12 @@ impl<R: Read + Seek> ArchiveReader<R> {
 
     /// Gets the comment of the archive.
     #[inline]
+    pub fn comment(&self) -> &[u8] {
+        &self.inner.comment
+    }
+
+    #[inline]
+    #[deprecated = "Use `comment` method instead"]
     pub fn commment(&self) -> &[u8] {
         &self.inner.comment
     }
